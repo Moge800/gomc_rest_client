@@ -11,6 +11,7 @@ from gomc_rest_client import (
     BusyError,
     ConnectionError,
     ForbiddenError,
+    MINIMUM_SUPPORTED_GOMC_REST_VERSION,
     PLCClient,
     PLCError,
     PLCProtocolError,
@@ -78,6 +79,16 @@ def test_health_and_read_write_and_remote_requests() -> None:
     session = FakeSession(
         [
             FakeResponse(payload={"plc_status": "ok", "connected": True}),
+            FakeResponse(
+                payload={
+                    "request_count": 1,
+                    "reconnect_count": 0,
+                    "plc_error_count": 0,
+                    "avg_latency_ms": 1.5,
+                    "queue_length": 0,
+                }
+            ),
+            FakeResponse(payload={"version": "v0.6.0"}),
             FakeResponse(payload={"values": [10, 20, 30]}),
             FakeResponse(payload={"ok": True}),
             FakeResponse(payload={"ok": True}),
@@ -90,6 +101,14 @@ def test_health_and_read_write_and_remote_requests() -> None:
     client = PLCClient("http://localhost:8080/", timeout=3.5, session=session)
 
     assert client.health() == {"plc_status": "ok", "connected": True}
+    assert client.metrics() == {
+        "request_count": 1,
+        "reconnect_count": 0,
+        "plc_error_count": 0,
+        "avg_latency_ms": 1.5,
+        "queue_length": 0,
+    }
+    assert client.version() == "v0.6.0"
     assert client.read("D100", 3, dword=True, sint=True) == [10, 20, 30]
     client.write("D100", [1, 2], dword=True)
     client.remote_run(clear=2, force=True)
@@ -98,10 +117,66 @@ def test_health_and_read_write_and_remote_requests() -> None:
     client.remote_latch_clear()
     client.remote_reset()
 
-    assert session.calls[1]["params"] == {"addr": "D100", "count": 3, "dword": True, "sint": True}
-    assert session.calls[2]["json"] == {"values": [1, 2]}
-    assert session.calls[3]["params"] == {"clear": 2, "force": True}
-    assert session.calls[5]["params"] == {"force": True}
+    assert session.calls[3]["params"] == {"addr": "D100", "count": 3, "dword": True, "sint": True}
+    assert session.calls[4]["json"] == {"values": [1, 2]}
+    assert session.calls[5]["params"] == {"clear": 2, "force": True}
+    assert session.calls[7]["params"] == {"force": True}
+
+
+@pytest.mark.parametrize(
+    ("server_version", "minimum_version", "allow_dev", "expected"),
+    [
+        ("v0.6.0", "v0.5.0", True, True),
+        ("0.5.0", "v0.5.0", True, True),
+        ("v0.4.9", "v0.5.0", True, False),
+        ("dev", "v0.5.0", True, True),
+        ("dev", "v0.5.0", False, False),
+    ],
+)
+def test_is_version_compatible(
+    server_version: str, minimum_version: str, allow_dev: bool, expected: bool
+) -> None:
+    session = FakeSession([FakeResponse(payload={"version": server_version})])
+    client = PLCClient(session=session)
+
+    assert client.is_version_compatible(minimum_version, allow_dev=allow_dev) is expected
+
+
+def test_version_rejects_malformed_success_payload() -> None:
+    session = FakeSession([FakeResponse(payload={"version": 123})])
+    client = PLCClient(session=session)
+
+    with pytest.raises(PLCError) as exc_info:
+        client.version()
+
+    assert exc_info.value.code == "bad_response"
+    assert exc_info.value.message == "response version must be a non-empty string"
+
+
+def test_is_version_compatible_rejects_invalid_minimum_version() -> None:
+    session = FakeSession([FakeResponse(payload={"version": "v0.6.0"})])
+    client = PLCClient(session=session)
+
+    with pytest.raises(ValueError, match="invalid version string: latest"):
+        client.is_version_compatible("latest")
+
+
+@pytest.mark.parametrize(
+    ("server_version", "allow_dev", "expected"),
+    [
+        ("v0.6.0", True, True),
+        ("v0.6.1", True, True),
+        ("v0.5.9", True, False),
+        ("dev", True, True),
+        ("dev", False, False),
+    ],
+)
+def test_is_supported_version(server_version: str, allow_dev: bool, expected: bool) -> None:
+    session = FakeSession([FakeResponse(payload={"version": server_version})])
+    client = PLCClient(session=session)
+
+    assert MINIMUM_SUPPORTED_GOMC_REST_VERSION == "v0.6.0"
+    assert client.is_supported_version(allow_dev=allow_dev) is expected
 
 
 @pytest.mark.parametrize(
