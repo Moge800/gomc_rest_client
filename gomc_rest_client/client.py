@@ -65,17 +65,17 @@ class PLCClient:
             self.session.close()
 
     def health(self) -> dict[str, Any]:
-        response = self.session.get(f"{self.base_url}/health", timeout=self.timeout)
+        response = self._request("GET", "/health")
         self._ensure_success(response)
         return _require_json_object(response)
 
     def read(
         self, addr: str, count: int = 1, *, dword: bool = False, sint: bool = False
     ) -> list[int] | list[bool]:
-        response = self.session.get(
-            f"{self.base_url}/read",
+        response = self._request(
+            "GET",
+            "/read",
             params={"addr": addr, "count": count, "dword": dword, "sint": sint},
-            timeout=self.timeout,
         )
         return self._read_values(response)
 
@@ -111,10 +111,17 @@ class PLCClient:
     def _post_ok(
         self, path: str, *, params: dict[str, Any] | None = None, json: dict[str, Any] | None = None
     ) -> None:
-        response = self.session.post(
-            f"{self.base_url}{path}", params=params, json=json, timeout=self.timeout
-        )
+        response = self._request("POST", path, params=params, json=json)
         self._ensure_success(response)
+
+    def _request(self, method: str, path: str, **kwargs: Any) -> ResponseLike:
+        request_method = self.session.get if method == "GET" else self.session.post
+        try:
+            return request_method(f"{self.base_url}{path}", timeout=self.timeout, **kwargs)
+        except requests.Timeout as exc:
+            raise RequestTimeoutError(str(exc), 0, "request_timeout") from exc
+        except requests.RequestException as exc:
+            raise ConnectionError(str(exc), 0, "connection_error") from exc
 
     def _read_values(self, response: ResponseLike) -> list[int] | list[bool]:
         self._ensure_success(response)
@@ -124,7 +131,15 @@ class PLCClient:
         values = body["values"]
         if not isinstance(values, list):
             raise PLCError("response values must be a list", response.status_code, "bad_response")
-        return values
+        if all(isinstance(value, bool) for value in values):
+            return values
+        if all(isinstance(value, int) and not isinstance(value, bool) for value in values):
+            return values
+        raise PLCError(
+            "response values must contain only ints or only bools",
+            response.status_code,
+            "bad_response",
+        )
 
     def _ensure_success(self, response: ResponseLike) -> None:
         if response.ok:
@@ -136,7 +151,7 @@ def raise_for_error(response: ResponseLike) -> None:
     body = _response_body(response)
     code = str(body.get("code", ""))
     message = str(body.get("error", response.text))
-    status = int(body.get("status", response.status_code))
+    status = _status_from_body(body, response.status_code)
     if code == "plc_error":
         raise PLCProtocolError(message, status, code, str(body.get("end_code", "")))
     exc_class = _CODE_TO_EXC.get(code, PLCError)
@@ -163,3 +178,10 @@ def _require_json_object(response: ResponseLike) -> dict[str, Any]:
     if isinstance(body, dict):
         return body
     raise PLCError("response body must be a JSON object", response.status_code, "bad_response")
+
+
+def _status_from_body(body: dict[str, Any], fallback_status: int) -> int:
+    try:
+        return int(body.get("status", fallback_status))
+    except (TypeError, ValueError):
+        return fallback_status

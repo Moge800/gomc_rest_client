@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
+import requests
 
 from gomc_rest_client import (
     BadRequestError,
@@ -49,6 +50,23 @@ class FakeSession:
 
     def close(self) -> None:
         self.closed = True
+
+
+class RaisingSession(FakeSession):
+    def __init__(self, exception: Exception, method: str) -> None:
+        super().__init__([])
+        self.exception = exception
+        self.method = method
+
+    def get(self, url: str, **kwargs: Any) -> FakeResponse:
+        if self.method == "GET":
+            raise self.exception
+        return super().get(url, **kwargs)
+
+    def post(self, url: str, **kwargs: Any) -> FakeResponse:
+        if self.method == "POST":
+            raise self.exception
+        return super().post(url, **kwargs)
 
 
 class FalseySession(FakeSession):
@@ -159,6 +177,8 @@ def test_health_raises_typed_error_for_non_2xx_response() -> None:
         ([], "response body must be a JSON object"),
         ({}, "response values are missing"),
         ({"values": "not-a-list"}, "response values must be a list"),
+        ({"values": ["bad"]}, "response values must contain only ints or only bools"),
+        ({"values": [1, True]}, "response values must contain only ints or only bools"),
     ],
 )
 def test_read_rejects_malformed_success_payload(payload: Any, error_message: str) -> None:
@@ -191,3 +211,58 @@ def test_falsey_custom_session_is_preserved() -> None:
 
     assert client.session is session
     assert client._owned_session is False
+
+
+@pytest.mark.parametrize(
+    ("exception", "exc_type", "code"),
+    [
+        (requests.Timeout("timed out"), RequestTimeoutError, "request_timeout"),
+        (requests.ConnectionError("connect failed"), ConnectionError, "connection_error"),
+    ],
+)
+def test_get_transport_failures_raise_typed_exceptions(
+    exception: Exception, exc_type: type[PLCError], code: str
+) -> None:
+    client = PLCClient(session=RaisingSession(exception, "GET"))
+
+    with pytest.raises(exc_type) as exc_info:
+        client.health()
+
+    assert exc_info.value.code == code
+    assert exc_info.value.status == 0
+
+
+@pytest.mark.parametrize(
+    ("exception", "exc_type", "code"),
+    [
+        (requests.Timeout("timed out"), RequestTimeoutError, "request_timeout"),
+        (requests.ConnectionError("connect failed"), ConnectionError, "connection_error"),
+    ],
+)
+def test_post_transport_failures_raise_typed_exceptions(
+    exception: Exception, exc_type: type[PLCError], code: str
+) -> None:
+    client = PLCClient(session=RaisingSession(exception, "POST"))
+
+    with pytest.raises(exc_type) as exc_info:
+        client.remote_stop()
+
+    assert exc_info.value.code == code
+    assert exc_info.value.status == 0
+
+
+def test_error_dispatch_falls_back_to_response_status_for_invalid_body_status() -> None:
+    session = FakeSession(
+        [
+            FakeResponse(
+                status_code=503,
+                payload={"status": None, "error": "connect failed", "code": "connection_error"},
+            )
+        ]
+    )
+    client = PLCClient(session=session)
+
+    with pytest.raises(ConnectionError) as exc_info:
+        client.remote_stop()
+
+    assert exc_info.value.status == 503
