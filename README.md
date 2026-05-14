@@ -2,7 +2,7 @@
 
 Python 3.10+ client library for the latest gomc-rest HTTP API.
 
-This package wraps the synchronous REST endpoints exposed by gomc-rest for Mitsubishi PLC read, write, and remote-control operations. It uses requests internally and converts API error responses into typed Python exceptions.
+This package wraps the synchronous REST endpoints exposed by gomc-rest for Mitsubishi PLC read, write, and remote-control operations using only the Python standard library, and converts API error responses into typed Python exceptions.
 
 ## Install
 

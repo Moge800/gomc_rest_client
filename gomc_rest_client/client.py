@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import json
 import re
 from typing import Any, Protocol
-
-import requests
+from urllib import error, parse, request
 
 from .exceptions import (
     BadRequestError,
@@ -48,6 +48,52 @@ class SessionLike(Protocol):
     def close(self) -> None: ...
 
 
+class _UrllibResponse:
+    def __init__(self, status_code: int, body: bytes) -> None:
+        self.status_code = status_code
+        self._body = body
+        self.text = body.decode("utf-8", errors="replace")
+
+    @property
+    def ok(self) -> bool:
+        return 200 <= self.status_code < 300
+
+    def json(self) -> Any:
+        return json.loads(self.text)
+
+
+class _UrllibSession:
+    def get(self, url: str, **kwargs: Any) -> ResponseLike:
+        return self._send("GET", url, **kwargs)
+
+    def post(self, url: str, **kwargs: Any) -> ResponseLike:
+        return self._send("POST", url, **kwargs)
+
+    def close(self) -> None:
+        return None
+
+    def _send(self, method: str, url: str, **kwargs: Any) -> ResponseLike:
+        params = kwargs.get("params")
+        timeout = kwargs.get("timeout")
+        json_body = kwargs.get("json")
+        full_url = _build_url(url, params)
+        headers: dict[str, str] = {}
+        data: bytes | None = None
+        if json_body is not None:
+            data = json.dumps(json_body).encode("utf-8")
+            headers["Content-Type"] = "application/json"
+        http_request = request.Request(full_url, data=data, headers=headers, method=method)
+        try:
+            with request.urlopen(http_request, timeout=timeout) as response:
+                return _UrllibResponse(response.status, response.read())
+        except error.HTTPError as exc:
+            return _UrllibResponse(exc.code, exc.read())
+
+
+def _create_default_session() -> SessionLike:
+    return _UrllibSession()
+
+
 class PLCClient:
     def __init__(
         self,
@@ -58,7 +104,7 @@ class PLCClient:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self._owned_session = session is None
-        self.session = requests.Session() if session is None else session
+        self.session = _create_default_session() if session is None else session
         self._cached_version: str | None = None
 
     def __enter__(self) -> PLCClient:
@@ -158,9 +204,15 @@ class PLCClient:
         request_method = self.session.get if method == "GET" else self.session.post
         try:
             return request_method(f"{self.base_url}{path}", timeout=self.timeout, **kwargs)
-        except requests.Timeout as exc:
+        except TimeoutError as exc:
             raise RequestTimeoutError(str(exc), 0, "request_timeout") from exc
-        except requests.RequestException as exc:
+        except error.URLError as exc:
+            if isinstance(exc.reason, TimeoutError):
+                raise RequestTimeoutError(str(exc), 0, "request_timeout") from exc
+            raise ConnectionError(str(exc), 0, "connection_error") from exc
+        except OSError as exc:
+            if isinstance(exc, TimeoutError):
+                raise RequestTimeoutError(str(exc), 0, "request_timeout") from exc
             raise ConnectionError(str(exc), 0, "connection_error") from exc
 
     def _read_values(self, response: ResponseLike) -> list[int] | list[bool]:
@@ -242,3 +294,11 @@ def _parse_semver(version: str) -> tuple[int, int, int]:
         raise ValueError(f"invalid version string: {version}")
     major, minor, patch = match.groups()
     return int(major), int(minor), int(patch)
+
+
+def _build_url(url: str, params: dict[str, Any] | None) -> str:
+    if not params:
+        return url
+    encoded_params = parse.urlencode(params)
+    separator = "&" if parse.urlsplit(url).query else "?"
+    return f"{url}{separator}{encoded_params}"

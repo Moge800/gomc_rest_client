@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
-import requests
 
 from gomc_rest_client import (
     MINIMUM_SUPPORTED_GOMC_REST_VERSION,
@@ -291,13 +290,13 @@ def test_read_rejects_malformed_success_payload(payload: Any, error_message: str
 
 def test_context_manager_closes_owned_session() -> None:
     session = FakeSession([])
-    original_session = PLCClient.__init__.__globals__["requests"].Session
-    PLCClient.__init__.__globals__["requests"].Session = lambda: session
+    original_factory = PLCClient.__init__.__globals__["_create_default_session"]
+    PLCClient.__init__.__globals__["_create_default_session"] = lambda: session
     try:
         with PLCClient(session=None):
             pass
     finally:
-        PLCClient.__init__.__globals__["requests"].Session = original_session
+        PLCClient.__init__.__globals__["_create_default_session"] = original_factory
 
     assert session.closed is True
 
@@ -313,8 +312,8 @@ def test_falsey_custom_session_is_preserved() -> None:
 @pytest.mark.parametrize(
     ("exception", "exc_type", "code"),
     [
-        (requests.Timeout("timed out"), RequestTimeoutError, "request_timeout"),
-        (requests.ConnectionError("connect failed"), ConnectionError, "connection_error"),
+        (TimeoutError("timed out"), RequestTimeoutError, "request_timeout"),
+        (OSError("connect failed"), ConnectionError, "connection_error"),
     ],
 )
 def test_get_transport_failures_raise_typed_exceptions(
@@ -332,8 +331,8 @@ def test_get_transport_failures_raise_typed_exceptions(
 @pytest.mark.parametrize(
     ("exception", "exc_type", "code"),
     [
-        (requests.Timeout("timed out"), RequestTimeoutError, "request_timeout"),
-        (requests.ConnectionError("connect failed"), ConnectionError, "connection_error"),
+        (TimeoutError("timed out"), RequestTimeoutError, "request_timeout"),
+        (OSError("connect failed"), ConnectionError, "connection_error"),
     ],
 )
 def test_post_transport_failures_raise_typed_exceptions(
