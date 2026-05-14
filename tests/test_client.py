@@ -438,6 +438,33 @@ def test_urllib_session_reuses_connection_for_same_origin(monkeypatch: pytest.Mo
     assert second_response.json() == {"request_count": 1}
 
 
+def test_urllib_session_close_closes_cached_connections(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created_connections: list[FakeHTTPConnection] = []
+
+    def fake_create_http_connection(
+        scheme: str, host: str, port: int | None, timeout: float | None
+    ) -> FakeHTTPConnection:
+        connection = FakeHTTPConnection([FakeHTTPResponse(200, b'{"ok":true}')])
+        created_connections.append(connection)
+        return connection
+
+    monkeypatch.setattr(
+        "gomc_rest_client.client._create_http_connection", fake_create_http_connection
+    )
+    session = _UrllibSession()
+
+    session.get("http://localhost:8080/health", timeout=3.5)
+    assert len(created_connections) == 1
+    assert created_connections[0].closed is False
+
+    session.close()
+
+    assert created_connections[0].closed is True
+    assert session._connections == {}
+
+
 def test_urllib_session_follows_redirects(monkeypatch: pytest.MonkeyPatch) -> None:
     redirect_connection = FakeHTTPConnection(
         [
@@ -474,6 +501,56 @@ def test_urllib_session_follows_redirects(monkeypatch: pytest.MonkeyPatch) -> No
         {"method": "GET", "path": "/health", "body": None, "headers": {}}
     ]
     assert response.json() == {"plc_status": "ok", "connected": True}
+
+
+def test_urllib_session_drops_cached_connection_after_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_connection = FakeHTTPConnection([FakeHTTPResponse(200, b'{"plc_status":"ok"}')])
+    replacement_connection = FakeHTTPConnection(
+        [FakeHTTPResponse(200, b'{"request_count":1}')]
+    )
+    created_connections: list[FakeHTTPConnection] = []
+
+    class FailingHTTPConnection(FakeHTTPConnection):
+        def request(
+            self,
+            method: str,
+            path: str,
+            body: bytes | None = None,
+            headers: dict[str, str] | None = None,
+        ) -> None:
+            raise OSError("connect failed")
+
+    failing_connection = FailingHTTPConnection([])
+    returned_connections = [first_connection, replacement_connection]
+
+    def fake_create_http_connection(
+        scheme: str, host: str, port: int | None, timeout: float | None
+    ) -> FakeHTTPConnection:
+        connection = returned_connections.pop(0)
+        created_connections.append(connection)
+        return connection
+
+    monkeypatch.setattr(
+        "gomc_rest_client.client._create_http_connection", fake_create_http_connection
+    )
+    session = _UrllibSession()
+
+    first_response = session.get("http://localhost:8080/health", timeout=3.5)
+    session._connections[("http", "localhost", 8080, 3.5)] = failing_connection
+
+    with pytest.raises(OSError, match="connect failed"):
+        session.get("http://localhost:8080/metrics", timeout=3.5)
+
+    assert failing_connection.closed is True
+    assert session._connections == {}
+
+    second_response = session.get("http://localhost:8080/metrics", timeout=3.5)
+
+    assert created_connections == [first_connection, replacement_connection]
+    assert first_response.json() == {"plc_status": "ok"}
+    assert second_response.json() == {"request_count": 1}
 
 
 @pytest.mark.parametrize(
