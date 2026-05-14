@@ -153,6 +153,17 @@ def test_version_rejects_malformed_success_payload() -> None:
     assert exc_info.value.message == "response version must be a non-empty string"
 
 
+def test_is_version_compatible_rejects_malformed_server_version_as_bad_response() -> None:
+    session = FakeSession([FakeResponse(payload={"version": "v0.6.0-rc1"})])
+    client = PLCClient(session=session)
+
+    with pytest.raises(PLCError) as exc_info:
+        client.is_version_compatible("v0.6.0")
+
+    assert exc_info.value.code == "bad_response"
+    assert exc_info.value.message == "invalid server version string: v0.6.0-rc1"
+
+
 def test_is_version_compatible_rejects_invalid_minimum_version() -> None:
     session = FakeSession([FakeResponse(payload={"version": "v0.6.0"})])
     client = PLCClient(session=session)

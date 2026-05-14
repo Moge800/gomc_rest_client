@@ -86,6 +86,15 @@ class PLCClient:
         body = _require_json_object(response)
         version = body.get("version")
         if isinstance(version, str) and version:
+            if version != "dev":
+                try:
+                    _parse_semver(version)
+                except ValueError as exc:
+                    raise PLCError(
+                        f"invalid server version string: {version}",
+                        response.status_code,
+                        "bad_response",
+                    ) from exc
             self._cached_version = version
             return version
         raise PLCError(
