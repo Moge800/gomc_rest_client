@@ -29,6 +29,8 @@ _CODE_TO_EXC = {
 }
 
 MINIMUM_SUPPORTED_GOMC_REST_VERSION = "v0.6.0"
+_REDIRECT_STATUSES = {301, 302, 303, 307, 308}
+_MAX_REDIRECTS = 5
 
 
 class ResponseLike(Protocol):
@@ -82,46 +84,70 @@ class _UrllibSession:
         params = kwargs.get("params")
         timeout = kwargs.get("timeout")
         json_body = kwargs.get("json")
-        full_url = _build_url(url, params)
-        parsed_url = parse.urlsplit(full_url)
-        connection = self._get_connection(parsed_url, timeout)
-        path = _request_target(parsed_url)
+        current_url = _build_url(url, params)
+        current_method = method
         headers: dict[str, str] = {}
-        data: bytes | None = None
+        current_data: bytes | None = None
         if json_body is not None:
-            data = json.dumps(json_body).encode("utf-8")
+            current_data = json.dumps(json_body).encode("utf-8")
             headers["Content-Type"] = "application/json"
-        try:
-            connection.request(method, path, body=data, headers=headers)
-            response = connection.getresponse()
-            return _UrllibResponse(response.status, response.read())
-        except Exception:
-            self._drop_connection(parsed_url, timeout)
-            raise
+        for _ in range(_MAX_REDIRECTS + 1):
+            parsed_url = parse.urlsplit(current_url)
+            connection = self._get_connection(parsed_url, timeout)
+            path = _request_target(parsed_url)
+            try:
+                connection.request(current_method, path, body=current_data, headers=headers)
+                response = connection.getresponse()
+                body = response.read()
+                location = response.getheader("Location")
+                if response.status in _REDIRECT_STATUSES and location:
+                    if hasattr(response, "close"):
+                        response.close()
+                    current_url = parse.urljoin(current_url, location)
+                    if response.status in {301, 302, 303} and current_method != "GET":
+                        current_method = "GET"
+                        current_data = None
+                        headers = {}
+                    continue
+                return _UrllibResponse(response.status, body)
+            except Exception:
+                self._drop_connection(parsed_url, timeout)
+                raise
+        raise OSError("too many redirects")
 
     def _get_connection(
         self, parsed_url: parse.SplitResult, timeout: float | None
     ) -> http_client.HTTPConnection:
-        scheme = parsed_url.scheme or "http"
-        host = parsed_url.hostname
-        if host is None:
-            raise OSError("host is required")
-        key = (scheme, host, parsed_url.port, timeout)
+        key = _connection_key(parsed_url, timeout)
         connection = self._connections.get(key)
         if connection is None:
-            connection = _create_http_connection(scheme, host, parsed_url.port, timeout)
+            scheme, host, port, _ = key
+            connection = _create_http_connection(scheme, host, port, timeout)
             self._connections[key] = connection
         return connection
 
     def _drop_connection(self, parsed_url: parse.SplitResult, timeout: float | None) -> None:
-        scheme = parsed_url.scheme or "http"
-        host = parsed_url.hostname
-        if host is None:
+        try:
+            key = _connection_key(parsed_url, timeout)
+        except OSError:
             return
-        key = (scheme, host, parsed_url.port, timeout)
         connection = self._connections.pop(key, None)
         if connection is not None:
             connection.close()
+
+
+def _connection_key(
+    parsed_url: parse.SplitResult, timeout: float | None
+) -> tuple[str, str, int | None, float | None]:
+    scheme = parsed_url.scheme or "http"
+    host = parsed_url.hostname
+    if host is None:
+        raise OSError("host is required")
+    try:
+        port = parsed_url.port
+    except ValueError as exc:
+        raise OSError(str(exc)) from exc
+    return (scheme, host, port, timeout)
 
 
 def _create_http_connection(

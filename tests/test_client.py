@@ -78,12 +78,21 @@ class FalseySession(FakeSession):
 
 
 class FakeHTTPResponse:
-    def __init__(self, status: int, body: bytes) -> None:
+    def __init__(
+        self,
+        status: int,
+        body: bytes,
+        headers: dict[str, str] | None = None,
+    ) -> None:
         self.status = status
         self._body = body
+        self._headers = headers or {}
 
     def read(self) -> bytes:
         return self._body
+
+    def getheader(self, name: str, default: str | None = None) -> str | None:
+        return self._headers.get(name, default)
 
     def close(self) -> None:
         return None
@@ -429,6 +438,44 @@ def test_urllib_session_reuses_connection_for_same_origin(monkeypatch: pytest.Mo
     assert second_response.json() == {"request_count": 1}
 
 
+def test_urllib_session_follows_redirects(monkeypatch: pytest.MonkeyPatch) -> None:
+    redirect_connection = FakeHTTPConnection(
+        [
+            FakeHTTPResponse(
+                301,
+                b"",
+                headers={"Location": "https://localhost:8443/health"},
+            )
+        ]
+    )
+    destination_connection = FakeHTTPConnection(
+        [FakeHTTPResponse(200, b'{"plc_status":"ok","connected":true}')]
+    )
+
+    def fake_create_http_connection(
+        scheme: str, host: str, port: int | None, timeout: float | None
+    ) -> FakeHTTPConnection:
+        if (scheme, host, port, timeout) == ("http", "localhost", 8080, 3.5):
+            return redirect_connection
+        if (scheme, host, port, timeout) == ("https", "localhost", 8443, 3.5):
+            return destination_connection
+        raise AssertionError((scheme, host, port, timeout))
+
+    monkeypatch.setattr(
+        "gomc_rest_client.client._create_http_connection", fake_create_http_connection
+    )
+
+    response = _UrllibSession().get("http://localhost:8080/health", timeout=3.5)
+
+    assert redirect_connection.requests == [
+        {"method": "GET", "path": "/health", "body": None, "headers": {}}
+    ]
+    assert destination_connection.requests == [
+        {"method": "GET", "path": "/health", "body": None, "headers": {}}
+    ]
+    assert response.json() == {"plc_status": "ok", "connected": True}
+
+
 @pytest.mark.parametrize(
     ("exception", "exc_type", "code"),
     [
@@ -474,6 +521,13 @@ def test_default_transport_rejects_unsupported_url_scheme() -> None:
     client = PLCClient("htps://localhost:8080")
 
     with pytest.raises(ConnectionError, match="unsupported URL scheme: htps"):
+        client.health()
+
+
+def test_default_transport_rejects_invalid_port() -> None:
+    client = PLCClient("http://localhost:abc")
+
+    with pytest.raises(ConnectionError, match="Port could not be cast"):
         client.health()
 
 
