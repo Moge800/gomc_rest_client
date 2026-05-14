@@ -1,6 +1,6 @@
 # gomc-rest-client
 
-[日本語版 README](README_JP.md)
+[日本語版 README](https://github.com/Moge800/gomc_rest_client/blob/main/README_JP.md)
 
 Python 3.10+ client library for the latest gomc-rest HTTP API.
 
