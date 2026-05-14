@@ -96,7 +96,11 @@ class FakeHTTPConnection:
         self.closed = False
 
     def request(
-        self, method: str, path: str, body: bytes | None = None, headers: dict[str, str] | None = None
+        self,
+        method: str,
+        path: str,
+        body: bytes | None = None,
+        headers: dict[str, str] | None = None,
     ) -> None:
         self.requests.append(
             {"method": method, "path": path, "body": body, "headers": headers or {}}
@@ -441,7 +445,11 @@ def test_default_transport_failures_raise_typed_exceptions(
 ) -> None:
     class RaisingHTTPConnection(FakeHTTPConnection):
         def request(
-            self, method: str, path: str, body: bytes | None = None, headers: dict[str, str] | None = None
+            self,
+            method: str,
+            path: str,
+            body: bytes | None = None,
+            headers: dict[str, str] | None = None,
         ) -> None:
             raise exception
 
@@ -460,6 +468,13 @@ def test_default_transport_failures_raise_typed_exceptions(
 
     assert exc_info.value.code == code
     assert exc_info.value.status == 0
+
+
+def test_default_transport_rejects_unsupported_url_scheme() -> None:
+    client = PLCClient("htps://localhost:8080")
+
+    with pytest.raises(ConnectionError, match="unsupported URL scheme: htps"):
+        client.health()
 
 
 def test_falsey_custom_session_is_preserved() -> None:

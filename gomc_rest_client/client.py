@@ -129,7 +129,9 @@ def _create_http_connection(
 ) -> http_client.HTTPConnection:
     if scheme == "https":
         return http_client.HTTPSConnection(host, port=port, timeout=timeout)
-    return http_client.HTTPConnection(host, port=port, timeout=timeout)
+    if scheme == "http":
+        return http_client.HTTPConnection(host, port=port, timeout=timeout)
+    raise OSError(f"unsupported URL scheme: {scheme}")
 
 
 def _create_default_session() -> SessionLike:
