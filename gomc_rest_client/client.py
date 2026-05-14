@@ -1,0 +1,187 @@
+from __future__ import annotations
+
+from typing import Any, Protocol
+
+import requests
+
+from .exceptions import (
+    BadRequestError,
+    BusyError,
+    ConnectionError,
+    ForbiddenError,
+    PLCError,
+    PLCProtocolError,
+    QueueClosedError,
+    RequestCanceledError,
+    RequestTimeoutError,
+)
+
+_CODE_TO_EXC = {
+    "bad_request": BadRequestError,
+    "forbidden": ForbiddenError,
+    "connection_error": ConnectionError,
+    "busy": BusyError,
+    "queue_closed": QueueClosedError,
+    "request_canceled": RequestCanceledError,
+    "request_timeout": RequestTimeoutError,
+}
+
+
+class ResponseLike(Protocol):
+    status_code: int
+    text: str
+
+    @property
+    def ok(self) -> bool: ...
+
+    def json(self) -> Any: ...
+
+
+class SessionLike(Protocol):
+    def get(self, url: str, **kwargs: Any) -> ResponseLike: ...
+
+    def post(self, url: str, **kwargs: Any) -> ResponseLike: ...
+
+    def close(self) -> None: ...
+
+
+class PLCClient:
+    def __init__(
+        self,
+        base_url: str = "http://localhost:8080",
+        timeout: float = 10.0,
+        session: SessionLike | None = None,
+    ) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.timeout = timeout
+        self._owned_session = session is None
+        self.session = requests.Session() if session is None else session
+
+    def __enter__(self) -> PLCClient:
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+        if self._owned_session:
+            self.session.close()
+
+    def health(self) -> dict[str, Any]:
+        response = self._request("GET", "/health")
+        self._ensure_success(response)
+        return _require_json_object(response)
+
+    def read(
+        self, addr: str, count: int = 1, *, dword: bool = False, sint: bool = False
+    ) -> list[int] | list[bool]:
+        response = self._request(
+            "GET",
+            "/read",
+            params={"addr": addr, "count": count, "dword": dword, "sint": sint},
+        )
+        return self._read_values(response)
+
+    def write(
+        self,
+        addr: str,
+        values: list[int] | list[bool],
+        *,
+        dword: bool = False,
+        sint: bool = False,
+    ) -> None:
+        self._post_ok(
+            "/write",
+            params={"addr": addr, "dword": dword, "sint": sint},
+            json={"values": list(values)},
+        )
+
+    def remote_run(self, clear: int = 0, force: bool = False) -> None:
+        self._post_ok("/remote/run", params={"clear": clear, "force": force})
+
+    def remote_stop(self) -> None:
+        self._post_ok("/remote/stop")
+
+    def remote_pause(self, force: bool = False) -> None:
+        self._post_ok("/remote/pause", params={"force": force})
+
+    def remote_latch_clear(self) -> None:
+        self._post_ok("/remote/latch-clear")
+
+    def remote_reset(self) -> None:
+        self._post_ok("/remote/reset")
+
+    def _post_ok(
+        self, path: str, *, params: dict[str, Any] | None = None, json: dict[str, Any] | None = None
+    ) -> None:
+        response = self._request("POST", path, params=params, json=json)
+        self._ensure_success(response)
+
+    def _request(self, method: str, path: str, **kwargs: Any) -> ResponseLike:
+        request_method = self.session.get if method == "GET" else self.session.post
+        try:
+            return request_method(f"{self.base_url}{path}", timeout=self.timeout, **kwargs)
+        except requests.Timeout as exc:
+            raise RequestTimeoutError(str(exc), 0, "request_timeout") from exc
+        except requests.RequestException as exc:
+            raise ConnectionError(str(exc), 0, "connection_error") from exc
+
+    def _read_values(self, response: ResponseLike) -> list[int] | list[bool]:
+        self._ensure_success(response)
+        body = _require_json_object(response)
+        if "values" not in body:
+            raise PLCError("response values are missing", response.status_code, "bad_response")
+        values = body["values"]
+        if not isinstance(values, list):
+            raise PLCError("response values must be a list", response.status_code, "bad_response")
+        if all(isinstance(value, bool) for value in values):
+            return values
+        if all(isinstance(value, int) and not isinstance(value, bool) for value in values):
+            return values
+        raise PLCError(
+            "response values must contain only ints or only bools",
+            response.status_code,
+            "bad_response",
+        )
+
+    def _ensure_success(self, response: ResponseLike) -> None:
+        if response.ok:
+            return
+        raise_for_error(response)
+
+
+def raise_for_error(response: ResponseLike) -> None:
+    body = _response_body(response)
+    code = str(body.get("code", ""))
+    message = str(body.get("error", response.text))
+    status = _status_from_body(body, response.status_code)
+    if code == "plc_error":
+        raise PLCProtocolError(message, status, code, str(body.get("end_code", "")))
+    exc_class = _CODE_TO_EXC.get(code, PLCError)
+    raise exc_class(message, status, code)
+
+
+def _response_body(response: ResponseLike) -> dict[str, Any]:
+    try:
+        body = response.json()
+    except ValueError:
+        return {}
+    return body if isinstance(body, dict) else {}
+
+
+def _require_json_object(response: ResponseLike) -> dict[str, Any]:
+    try:
+        body = response.json()
+    except ValueError as exc:
+        raise PLCError(
+            "response body must be a JSON object",
+            response.status_code,
+            "bad_response",
+        ) from exc
+    if isinstance(body, dict):
+        return body
+    raise PLCError("response body must be a JSON object", response.status_code, "bad_response")
+
+
+def _status_from_body(body: dict[str, Any], fallback_status: int) -> int:
+    try:
+        return int(body.get("status", fallback_status))
+    except (TypeError, ValueError):
+        return fallback_status
