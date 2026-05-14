@@ -6,16 +6,44 @@ Python 3.10+ client library for the latest gomc-rest HTTP API.
 
 This package wraps the synchronous REST endpoints exposed by gomc-rest for Mitsubishi PLC read, write, and remote-control operations using only the Python standard library, and converts API error responses into typed Python exceptions.
 
+## About gomc-rest-client
+
+This package is a dedicated client library for gomc-rest. It is intended for users who already use gomc-rest, or who want to expose Mitsubishi PLC operations through the gomc-rest HTTP API.
+
+This library does not communicate with PLCs directly. If you need the server, API surface, or gomc-rest itself, see the upstream project:
+
+- https://github.com/Moge800/gomc-rest
+
 ## Install
 
 ```bash
 uv add gomc-rest-client
 ```
 
+With pip:
+
+```bash
+pip install gomc-rest-client
+```
+
+For offline environments, install from a prebuilt wheel distributed inside your network:
+
+```bash
+pip install dist/gomc_rest_client-*.whl
+```
+
+This package has no runtime dependencies outside the Python standard library, so wheel-based offline installation is straightforward.
+
 For local development:
 
 ```bash
 uv sync --group dev
+```
+
+To build distributable artifacts before taking them into an offline environment:
+
+```bash
+uv build
 ```
 
 ## Usage
