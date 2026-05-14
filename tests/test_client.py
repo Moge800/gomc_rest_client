@@ -51,6 +51,11 @@ class FakeSession:
         self.closed = True
 
 
+class FalseySession(FakeSession):
+    def __bool__(self) -> bool:
+        return False
+
+
 def test_health_and_read_write_and_remote_requests() -> None:
     session = FakeSession(
         [
@@ -178,3 +183,11 @@ def test_context_manager_closes_owned_session() -> None:
         PLCClient.__init__.__globals__["requests"].Session = original_session
 
     assert session.closed is True
+
+
+def test_falsey_custom_session_is_preserved() -> None:
+    session = FalseySession([])
+    client = PLCClient(session=session)
+
+    assert client.session is session
+    assert client._owned_session is False

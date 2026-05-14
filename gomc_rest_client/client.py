@@ -55,7 +55,7 @@ class PLCClient:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self._owned_session = session is None
-        self.session = session or requests.Session()
+        self.session = requests.Session() if session is None else session
 
     def __enter__(self) -> PLCClient:
         return self
