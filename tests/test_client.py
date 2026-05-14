@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import io
 from dataclasses import dataclass, field
-from email.message import Message
 from http import client as http_client
 from typing import Any
 from urllib import error
@@ -79,7 +77,7 @@ class FalseySession(FakeSession):
         return False
 
 
-class FakeUrlopenResponse:
+class FakeHTTPResponse:
     def __init__(self, status: int, body: bytes) -> None:
         self.status = status
         self._body = body
@@ -87,21 +85,28 @@ class FakeUrlopenResponse:
     def read(self) -> bytes:
         return self._body
 
-    def __enter__(self) -> FakeUrlopenResponse:
-        return self
-
-    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+    def close(self) -> None:
         return None
 
 
-class TrackableBytesIO(io.BytesIO):
-    def __init__(self, initial_bytes: bytes) -> None:
-        super().__init__(initial_bytes)
-        self.was_closed = False
+class FakeHTTPConnection:
+    def __init__(self, responses: list[FakeHTTPResponse]) -> None:
+        self._responses = responses
+        self.requests: list[dict[str, Any]] = []
+        self.closed = False
+
+    def request(
+        self, method: str, path: str, body: bytes | None = None, headers: dict[str, str] | None = None
+    ) -> None:
+        self.requests.append(
+            {"method": method, "path": path, "body": body, "headers": headers or {}}
+        )
+
+    def getresponse(self) -> FakeHTTPResponse:
+        return self._responses.pop(0)
 
     def close(self) -> None:
-        self.was_closed = True
-        super().close()
+        self.closed = True
 
 
 def test_health_and_read_write_and_remote_requests() -> None:
@@ -332,17 +337,22 @@ def test_context_manager_closes_owned_session() -> None:
 
 
 def test_urllib_session_builds_query_and_json_body(monkeypatch: pytest.MonkeyPatch) -> None:
-    captured: dict[str, Any] = {}
+    created_connections: list[FakeHTTPConnection] = []
 
-    def fake_urlopen(http_request: Any, timeout: float | None = None) -> FakeUrlopenResponse:
-        captured["url"] = http_request.full_url
-        captured["method"] = http_request.get_method()
-        captured["body"] = http_request.data
-        captured["content_type"] = http_request.get_header("Content-type")
-        captured["timeout"] = timeout
-        return FakeUrlopenResponse(200, b'{"ok":true}')
+    def fake_create_http_connection(
+        scheme: str, host: str, port: int | None, timeout: float | None
+    ) -> FakeHTTPConnection:
+        connection = FakeHTTPConnection([FakeHTTPResponse(200, b'{"ok":true}')])
+        created_connections.append(connection)
+        assert scheme == "http"
+        assert host == "localhost"
+        assert port == 8080
+        assert timeout == 3.5
+        return connection
 
-    monkeypatch.setattr("gomc_rest_client.client.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(
+        "gomc_rest_client.client._create_http_connection", fake_create_http_connection
+    )
 
     response = _UrllibSession().post(
         "http://localhost:8080/write",
@@ -351,27 +361,30 @@ def test_urllib_session_builds_query_and_json_body(monkeypatch: pytest.MonkeyPat
         timeout=3.5,
     )
 
-    assert captured["url"] == "http://localhost:8080/write?addr=D100&dword=True"
-    assert captured["method"] == "POST"
-    assert captured["body"] == b'{"values": [1, 2]}'
-    assert captured["content_type"] == "application/json"
-    assert captured["timeout"] == 3.5
+    assert len(created_connections) == 1
+    assert created_connections[0].requests == [
+        {
+            "method": "POST",
+            "path": "/write?addr=D100&dword=True",
+            "body": b'{"values": [1, 2]}',
+            "headers": {"Content-Type": "application/json"},
+        }
+    ]
     assert response.status_code == 200
     assert response.json() == {"ok": True}
 
 
 def test_urllib_session_returns_http_error_response(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fake_urlopen(http_request: Any, timeout: float | None = None) -> FakeUrlopenResponse:
-        headers = Message()
-        raise error.HTTPError(
-            url=http_request.full_url,
-            code=403,
-            msg="Forbidden",
-            hdrs=headers,
-            fp=io.BytesIO(b'{"status":403,"error":"forbidden","code":"forbidden"}'),
+    def fake_create_http_connection(
+        scheme: str, host: str, port: int | None, timeout: float | None
+    ) -> FakeHTTPConnection:
+        return FakeHTTPConnection(
+            [FakeHTTPResponse(403, b'{"status":403,"error":"forbidden","code":"forbidden"}')]
         )
 
-    monkeypatch.setattr("gomc_rest_client.client.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(
+        "gomc_rest_client.client._create_http_connection", fake_create_http_connection
+    )
 
     response = _UrllibSession().get("http://localhost:8080/remote/run", timeout=3.5)
 
@@ -380,25 +393,36 @@ def test_urllib_session_returns_http_error_response(monkeypatch: pytest.MonkeyPa
     assert response.json() == {"status": 403, "error": "forbidden", "code": "forbidden"}
 
 
-def test_urllib_session_closes_http_error_after_read(monkeypatch: pytest.MonkeyPatch) -> None:
-    body = TrackableBytesIO(b'{"status":403,"error":"forbidden","code":"forbidden"}')
+def test_urllib_session_reuses_connection_for_same_origin(monkeypatch: pytest.MonkeyPatch) -> None:
+    created_connections: list[FakeHTTPConnection] = []
+    connection = FakeHTTPConnection(
+        [
+            FakeHTTPResponse(200, b'{"plc_status":"ok","connected":true}'),
+            FakeHTTPResponse(200, b'{"request_count":1}'),
+        ]
+    )
 
-    def fake_urlopen(http_request: Any, timeout: float | None = None) -> FakeUrlopenResponse:
-        headers = Message()
-        raise error.HTTPError(
-            url=http_request.full_url,
-            code=403,
-            msg="Forbidden",
-            hdrs=headers,
-            fp=body,
-        )
+    def fake_create_http_connection(
+        scheme: str, host: str, port: int | None, timeout: float | None
+    ) -> FakeHTTPConnection:
+        created_connections.append(connection)
+        return connection
 
-    monkeypatch.setattr("gomc_rest_client.client.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(
+        "gomc_rest_client.client._create_http_connection", fake_create_http_connection
+    )
+    session = _UrllibSession()
 
-    response = _UrllibSession().get("http://localhost:8080/remote/run", timeout=3.5)
+    first_response = session.get("http://localhost:8080/health", timeout=3.5)
+    second_response = session.get("http://localhost:8080/metrics", timeout=3.5)
 
-    assert response.status_code == 403
-    assert body.was_closed is True
+    assert len(created_connections) == 1
+    assert connection.requests == [
+        {"method": "GET", "path": "/health", "body": None, "headers": {}},
+        {"method": "GET", "path": "/metrics", "body": None, "headers": {}},
+    ]
+    assert first_response.json() == {"plc_status": "ok", "connected": True}
+    assert second_response.json() == {"request_count": 1}
 
 
 @pytest.mark.parametrize(
@@ -415,10 +439,20 @@ def test_default_transport_failures_raise_typed_exceptions(
     exc_type: type[PLCError],
     code: str,
 ) -> None:
-    def fake_urlopen(http_request: Any, timeout: float | None = None) -> FakeUrlopenResponse:
-        raise exception
+    class RaisingHTTPConnection(FakeHTTPConnection):
+        def request(
+            self, method: str, path: str, body: bytes | None = None, headers: dict[str, str] | None = None
+        ) -> None:
+            raise exception
 
-    monkeypatch.setattr("gomc_rest_client.client.request.urlopen", fake_urlopen)
+    def fake_create_http_connection(
+        scheme: str, host: str, port: int | None, timeout: float | None
+    ) -> FakeHTTPConnection:
+        return RaisingHTTPConnection([])
+
+    monkeypatch.setattr(
+        "gomc_rest_client.client._create_http_connection", fake_create_http_connection
+    )
     client = PLCClient()
 
     with pytest.raises(exc_type) as exc_info:

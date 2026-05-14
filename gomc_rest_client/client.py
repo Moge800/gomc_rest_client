@@ -4,7 +4,7 @@ import json
 import re
 from http import client as http_client
 from typing import Any, Protocol
-from urllib import error, parse, request
+from urllib import error, parse
 
 from .exceptions import (
     BadRequestError,
@@ -64,6 +64,9 @@ class _UrllibResponse:
 
 
 class _UrllibSession:
+    def __init__(self) -> None:
+        self._connections: dict[tuple[str, str, int | None, float | None], Any] = {}
+
     def get(self, url: str, **kwargs: Any) -> ResponseLike:
         return self._send("GET", url, **kwargs)
 
@@ -71,27 +74,62 @@ class _UrllibSession:
         return self._send("POST", url, **kwargs)
 
     def close(self) -> None:
-        return None
+        for connection in self._connections.values():
+            connection.close()
+        self._connections.clear()
 
     def _send(self, method: str, url: str, **kwargs: Any) -> ResponseLike:
         params = kwargs.get("params")
         timeout = kwargs.get("timeout")
         json_body = kwargs.get("json")
         full_url = _build_url(url, params)
+        parsed_url = parse.urlsplit(full_url)
+        connection = self._get_connection(parsed_url, timeout)
+        path = _request_target(parsed_url)
         headers: dict[str, str] = {}
         data: bytes | None = None
         if json_body is not None:
             data = json.dumps(json_body).encode("utf-8")
             headers["Content-Type"] = "application/json"
-        http_request = request.Request(full_url, data=data, headers=headers, method=method)
         try:
-            with request.urlopen(http_request, timeout=timeout) as response:
-                return _UrllibResponse(response.status, response.read())
-        except error.HTTPError as exc:
-            try:
-                return _UrllibResponse(exc.code, exc.read())
-            finally:
-                exc.close()
+            connection.request(method, path, body=data, headers=headers)
+            response = connection.getresponse()
+            return _UrllibResponse(response.status, response.read())
+        except Exception:
+            self._drop_connection(parsed_url, timeout)
+            raise
+
+    def _get_connection(
+        self, parsed_url: parse.SplitResult, timeout: float | None
+    ) -> http_client.HTTPConnection:
+        scheme = parsed_url.scheme or "http"
+        host = parsed_url.hostname
+        if host is None:
+            raise OSError("host is required")
+        key = (scheme, host, parsed_url.port, timeout)
+        connection = self._connections.get(key)
+        if connection is None:
+            connection = _create_http_connection(scheme, host, parsed_url.port, timeout)
+            self._connections[key] = connection
+        return connection
+
+    def _drop_connection(self, parsed_url: parse.SplitResult, timeout: float | None) -> None:
+        scheme = parsed_url.scheme or "http"
+        host = parsed_url.hostname
+        if host is None:
+            return
+        key = (scheme, host, parsed_url.port, timeout)
+        connection = self._connections.pop(key, None)
+        if connection is not None:
+            connection.close()
+
+
+def _create_http_connection(
+    scheme: str, host: str, port: int | None, timeout: float | None
+) -> http_client.HTTPConnection:
+    if scheme == "https":
+        return http_client.HTTPSConnection(host, port=port, timeout=timeout)
+    return http_client.HTTPConnection(host, port=port, timeout=timeout)
 
 
 def _create_default_session() -> SessionLike:
@@ -308,3 +346,10 @@ def _build_url(url: str, params: dict[str, Any] | None) -> str:
     encoded_params = parse.urlencode(params)
     separator = "&" if parse.urlsplit(url).query else "?"
     return f"{url}{separator}{encoded_params}"
+
+
+def _request_target(parsed_url: parse.SplitResult) -> str:
+    path = parsed_url.path or "/"
+    if parsed_url.query:
+        return f"{path}?{parsed_url.query}"
+    return path
