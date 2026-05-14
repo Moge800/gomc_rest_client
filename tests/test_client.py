@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from http import client as http_client
 import io
 from dataclasses import dataclass, field
 from email.message import Message
+from http import client as http_client
 from typing import Any
 from urllib import error
 

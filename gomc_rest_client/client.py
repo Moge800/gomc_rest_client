@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from http import client as http_client
 import json
 import re
+from http import client as http_client
 from typing import Any, Protocol
 from urllib import error, parse, request
 
