@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from http import client as http_client
 import json
 import re
 from typing import Any, Protocol
@@ -209,6 +210,8 @@ class PLCClient:
         except error.URLError as exc:
             if isinstance(exc.reason, TimeoutError):
                 raise RequestTimeoutError(str(exc), 0, "request_timeout") from exc
+            raise ConnectionError(str(exc), 0, "connection_error") from exc
+        except http_client.HTTPException as exc:
             raise ConnectionError(str(exc), 0, "connection_error") from exc
         except OSError as exc:
             if isinstance(exc, TimeoutError):

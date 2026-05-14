@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from http import client as http_client
 import io
 from dataclasses import dataclass, field
 from email.message import Message
@@ -373,6 +374,7 @@ def test_urllib_session_returns_http_error_response(monkeypatch: pytest.MonkeyPa
     ("exception", "exc_type", "code"),
     [
         (TimeoutError("timed out"), RequestTimeoutError, "request_timeout"),
+        (http_client.BadStatusLine("bad status"), ConnectionError, "connection_error"),
         (error.URLError("connect failed"), ConnectionError, "connection_error"),
     ],
 )
