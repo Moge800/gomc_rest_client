@@ -22,14 +22,14 @@ from gomc_rest_client import (
 @dataclass
 class FakeResponse:
     status_code: int = 200
-    payload: dict[str, Any] = field(default_factory=dict)
+    payload: Any = field(default_factory=dict)
     text: str = ""
 
     @property
     def ok(self) -> bool:
         return 200 <= self.status_code < 300
 
-    def json(self) -> dict[str, Any]:
+    def json(self) -> Any:
         return self.payload
 
 
@@ -131,6 +131,40 @@ def test_plc_protocol_error_captures_end_code() -> None:
         client.remote_reset()
 
     assert exc_info.value.end_code == "0x4000"
+
+
+def test_health_raises_typed_error_for_non_2xx_response() -> None:
+    session = FakeSession(
+        [
+            FakeResponse(
+                status_code=503,
+                payload={"status": 503, "error": "connect: refused", "code": "connection_error"},
+            )
+        ]
+    )
+    client = PLCClient(session=session)
+
+    with pytest.raises(ConnectionError):
+        client.health()
+
+
+@pytest.mark.parametrize(
+    "payload,error_message",
+    [
+        ([], "response body must be a JSON object"),
+        ({}, "response values are missing"),
+        ({"values": "not-a-list"}, "response values must be a list"),
+    ],
+)
+def test_read_rejects_malformed_success_payload(payload: Any, error_message: str) -> None:
+    session = FakeSession([FakeResponse(payload=payload)])
+    client = PLCClient(session=session)
+
+    with pytest.raises(PLCError) as exc_info:
+        client.read("D100")
+
+    assert exc_info.value.code == "bad_response"
+    assert exc_info.value.message == error_message
 
 
 def test_context_manager_closes_owned_session() -> None:

@@ -66,7 +66,8 @@ class PLCClient:
 
     def health(self) -> dict[str, Any]:
         response = self.session.get(f"{self.base_url}/health", timeout=self.timeout)
-        return response.json()
+        self._ensure_success(response)
+        return _require_json_object(response)
 
     def read(
         self, addr: str, count: int = 1, *, dword: bool = False, sint: bool = False
@@ -117,7 +118,10 @@ class PLCClient:
 
     def _read_values(self, response: ResponseLike) -> list[int] | list[bool]:
         self._ensure_success(response)
-        values = response.json().get("values", [])
+        body = _require_json_object(response)
+        if "values" not in body:
+            raise PLCError("response values are missing", response.status_code, "bad_response")
+        values = body["values"]
         if not isinstance(values, list):
             raise PLCError("response values must be a list", response.status_code, "bad_response")
         return values
@@ -145,3 +149,17 @@ def _response_body(response: ResponseLike) -> dict[str, Any]:
     except ValueError:
         return {}
     return body if isinstance(body, dict) else {}
+
+
+def _require_json_object(response: ResponseLike) -> dict[str, Any]:
+    try:
+        body = response.json()
+    except ValueError as exc:
+        raise PLCError(
+            "response body must be a JSON object",
+            response.status_code,
+            "bad_response",
+        ) from exc
+    if isinstance(body, dict):
+        return body
+    raise PLCError("response body must be a JSON object", response.status_code, "bad_response")

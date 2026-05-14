@@ -37,6 +37,21 @@ dev = [
 requires = ["hatchling>=1.27.0"]
 build-backend = "hatchling.build"
 
+[tool.hatch.build.targets.wheel]
+packages = ["gomc_rest_client"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"gomc_rest_client/py.typed" = "gomc_rest_client/py.typed"
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/gomc_rest_client",
+  "/tests",
+  "/README.md",
+  "/LICENSE",
+  "/pyproject.toml",
+]
+
 [tool.ruff]
 line-length = 100
 target-version = "py310"
