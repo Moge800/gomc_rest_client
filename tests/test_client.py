@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from http import client as http_client
 from typing import Any
+from urllib import error
 
 import pytest
-import requests
 
 from gomc_rest_client import (
     MINIMUM_SUPPORTED_GOMC_REST_VERSION,
@@ -19,6 +20,7 @@ from gomc_rest_client import (
     RequestCanceledError,
     RequestTimeoutError,
 )
+from gomc_rest_client.client import _UrllibSession
 
 
 @dataclass
@@ -73,6 +75,51 @@ class RaisingSession(FakeSession):
 class FalseySession(FakeSession):
     def __bool__(self) -> bool:
         return False
+
+
+class FakeHTTPResponse:
+    def __init__(
+        self,
+        status: int,
+        body: bytes,
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        self.status = status
+        self._body = body
+        self._headers = headers or {}
+
+    def read(self) -> bytes:
+        return self._body
+
+    def getheader(self, name: str, default: str | None = None) -> str | None:
+        return self._headers.get(name, default)
+
+    def close(self) -> None:
+        return None
+
+
+class FakeHTTPConnection:
+    def __init__(self, responses: list[FakeHTTPResponse]) -> None:
+        self._responses = responses
+        self.requests: list[dict[str, Any]] = []
+        self.closed = False
+
+    def request(
+        self,
+        method: str,
+        path: str,
+        body: bytes | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        self.requests.append(
+            {"method": method, "path": path, "body": body, "headers": headers or {}}
+        )
+
+    def getresponse(self) -> FakeHTTPResponse:
+        return self._responses.pop(0)
+
+    def close(self) -> None:
+        self.closed = True
 
 
 def test_health_and_read_write_and_remote_requests() -> None:
@@ -291,15 +338,274 @@ def test_read_rejects_malformed_success_payload(payload: Any, error_message: str
 
 def test_context_manager_closes_owned_session() -> None:
     session = FakeSession([])
-    original_session = PLCClient.__init__.__globals__["requests"].Session
-    PLCClient.__init__.__globals__["requests"].Session = lambda: session
+    original_factory = PLCClient.__init__.__globals__["_create_default_session"]
+    PLCClient.__init__.__globals__["_create_default_session"] = lambda: session
     try:
         with PLCClient(session=None):
             pass
     finally:
-        PLCClient.__init__.__globals__["requests"].Session = original_session
+        PLCClient.__init__.__globals__["_create_default_session"] = original_factory
 
     assert session.closed is True
+
+
+def test_urllib_session_builds_query_and_json_body(monkeypatch: pytest.MonkeyPatch) -> None:
+    created_connections: list[FakeHTTPConnection] = []
+
+    def fake_create_http_connection(
+        scheme: str, host: str, port: int | None, timeout: float | None
+    ) -> FakeHTTPConnection:
+        connection = FakeHTTPConnection([FakeHTTPResponse(200, b'{"ok":true}')])
+        created_connections.append(connection)
+        assert scheme == "http"
+        assert host == "localhost"
+        assert port == 8080
+        assert timeout == 3.5
+        return connection
+
+    monkeypatch.setattr(
+        "gomc_rest_client.client._create_http_connection", fake_create_http_connection
+    )
+
+    response = _UrllibSession().post(
+        "http://localhost:8080/write",
+        params={"addr": "D100", "dword": True},
+        json={"values": [1, 2]},
+        timeout=3.5,
+    )
+
+    assert len(created_connections) == 1
+    assert created_connections[0].requests == [
+        {
+            "method": "POST",
+            "path": "/write?addr=D100&dword=True",
+            "body": b'{"values": [1, 2]}',
+            "headers": {"Content-Type": "application/json"},
+        }
+    ]
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
+
+
+def test_urllib_session_returns_http_error_response(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_create_http_connection(
+        scheme: str, host: str, port: int | None, timeout: float | None
+    ) -> FakeHTTPConnection:
+        return FakeHTTPConnection(
+            [FakeHTTPResponse(403, b'{"status":403,"error":"forbidden","code":"forbidden"}')]
+        )
+
+    monkeypatch.setattr(
+        "gomc_rest_client.client._create_http_connection", fake_create_http_connection
+    )
+
+    response = _UrllibSession().get("http://localhost:8080/remote/run", timeout=3.5)
+
+    assert response.status_code == 403
+    assert response.ok is False
+    assert response.json() == {"status": 403, "error": "forbidden", "code": "forbidden"}
+
+
+def test_urllib_session_reuses_connection_for_same_origin(monkeypatch: pytest.MonkeyPatch) -> None:
+    created_connections: list[FakeHTTPConnection] = []
+    connection = FakeHTTPConnection(
+        [
+            FakeHTTPResponse(200, b'{"plc_status":"ok","connected":true}'),
+            FakeHTTPResponse(200, b'{"request_count":1}'),
+        ]
+    )
+
+    def fake_create_http_connection(
+        scheme: str, host: str, port: int | None, timeout: float | None
+    ) -> FakeHTTPConnection:
+        created_connections.append(connection)
+        return connection
+
+    monkeypatch.setattr(
+        "gomc_rest_client.client._create_http_connection", fake_create_http_connection
+    )
+    session = _UrllibSession()
+
+    first_response = session.get("http://localhost:8080/health", timeout=3.5)
+    second_response = session.get("http://localhost:8080/metrics", timeout=3.5)
+
+    assert len(created_connections) == 1
+    assert connection.requests == [
+        {"method": "GET", "path": "/health", "body": None, "headers": {}},
+        {"method": "GET", "path": "/metrics", "body": None, "headers": {}},
+    ]
+    assert first_response.json() == {"plc_status": "ok", "connected": True}
+    assert second_response.json() == {"request_count": 1}
+
+
+def test_urllib_session_close_closes_cached_connections(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created_connections: list[FakeHTTPConnection] = []
+
+    def fake_create_http_connection(
+        scheme: str, host: str, port: int | None, timeout: float | None
+    ) -> FakeHTTPConnection:
+        connection = FakeHTTPConnection([FakeHTTPResponse(200, b'{"ok":true}')])
+        created_connections.append(connection)
+        return connection
+
+    monkeypatch.setattr(
+        "gomc_rest_client.client._create_http_connection", fake_create_http_connection
+    )
+    session = _UrllibSession()
+
+    session.get("http://localhost:8080/health", timeout=3.5)
+    assert len(created_connections) == 1
+    assert created_connections[0].closed is False
+
+    session.close()
+
+    assert created_connections[0].closed is True
+    assert session._connections == {}
+
+
+def test_urllib_session_follows_redirects(monkeypatch: pytest.MonkeyPatch) -> None:
+    redirect_connection = FakeHTTPConnection(
+        [
+            FakeHTTPResponse(
+                301,
+                b"",
+                headers={"Location": "https://localhost:8443/health"},
+            )
+        ]
+    )
+    destination_connection = FakeHTTPConnection(
+        [FakeHTTPResponse(200, b'{"plc_status":"ok","connected":true}')]
+    )
+
+    def fake_create_http_connection(
+        scheme: str, host: str, port: int | None, timeout: float | None
+    ) -> FakeHTTPConnection:
+        if (scheme, host, port, timeout) == ("http", "localhost", 8080, 3.5):
+            return redirect_connection
+        if (scheme, host, port, timeout) == ("https", "localhost", 8443, 3.5):
+            return destination_connection
+        raise AssertionError((scheme, host, port, timeout))
+
+    monkeypatch.setattr(
+        "gomc_rest_client.client._create_http_connection", fake_create_http_connection
+    )
+
+    response = _UrllibSession().get("http://localhost:8080/health", timeout=3.5)
+
+    assert redirect_connection.requests == [
+        {"method": "GET", "path": "/health", "body": None, "headers": {}}
+    ]
+    assert destination_connection.requests == [
+        {"method": "GET", "path": "/health", "body": None, "headers": {}}
+    ]
+    assert response.json() == {"plc_status": "ok", "connected": True}
+
+
+def test_urllib_session_drops_cached_connection_after_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_connection = FakeHTTPConnection([FakeHTTPResponse(200, b'{"plc_status":"ok"}')])
+    replacement_connection = FakeHTTPConnection(
+        [FakeHTTPResponse(200, b'{"request_count":1}')]
+    )
+    created_connections: list[FakeHTTPConnection] = []
+
+    class FailingHTTPConnection(FakeHTTPConnection):
+        def request(
+            self,
+            method: str,
+            path: str,
+            body: bytes | None = None,
+            headers: dict[str, str] | None = None,
+        ) -> None:
+            raise OSError("connect failed")
+
+    failing_connection = FailingHTTPConnection([])
+    returned_connections = [first_connection, replacement_connection]
+
+    def fake_create_http_connection(
+        scheme: str, host: str, port: int | None, timeout: float | None
+    ) -> FakeHTTPConnection:
+        connection = returned_connections.pop(0)
+        created_connections.append(connection)
+        return connection
+
+    monkeypatch.setattr(
+        "gomc_rest_client.client._create_http_connection", fake_create_http_connection
+    )
+    session = _UrllibSession()
+
+    first_response = session.get("http://localhost:8080/health", timeout=3.5)
+    session._connections[("http", "localhost", 8080, 3.5)] = failing_connection
+
+    with pytest.raises(OSError, match="connect failed"):
+        session.get("http://localhost:8080/metrics", timeout=3.5)
+
+    assert failing_connection.closed is True
+    assert session._connections == {}
+
+    second_response = session.get("http://localhost:8080/metrics", timeout=3.5)
+
+    assert created_connections == [first_connection, replacement_connection]
+    assert first_response.json() == {"plc_status": "ok"}
+    assert second_response.json() == {"request_count": 1}
+
+
+@pytest.mark.parametrize(
+    ("exception", "exc_type", "code"),
+    [
+        (TimeoutError("timed out"), RequestTimeoutError, "request_timeout"),
+        (http_client.BadStatusLine("bad status"), ConnectionError, "connection_error"),
+        (error.URLError("connect failed"), ConnectionError, "connection_error"),
+    ],
+)
+def test_default_transport_failures_raise_typed_exceptions(
+    monkeypatch: pytest.MonkeyPatch,
+    exception: Exception,
+    exc_type: type[PLCError],
+    code: str,
+) -> None:
+    class RaisingHTTPConnection(FakeHTTPConnection):
+        def request(
+            self,
+            method: str,
+            path: str,
+            body: bytes | None = None,
+            headers: dict[str, str] | None = None,
+        ) -> None:
+            raise exception
+
+    def fake_create_http_connection(
+        scheme: str, host: str, port: int | None, timeout: float | None
+    ) -> FakeHTTPConnection:
+        return RaisingHTTPConnection([])
+
+    monkeypatch.setattr(
+        "gomc_rest_client.client._create_http_connection", fake_create_http_connection
+    )
+    client = PLCClient()
+
+    with pytest.raises(exc_type) as exc_info:
+        client.health()
+
+    assert exc_info.value.code == code
+    assert exc_info.value.status == 0
+
+
+def test_default_transport_rejects_unsupported_url_scheme() -> None:
+    client = PLCClient("htps://localhost:8080")
+
+    with pytest.raises(ConnectionError, match="unsupported URL scheme: htps"):
+        client.health()
+
+
+def test_default_transport_rejects_invalid_port() -> None:
+    client = PLCClient("http://localhost:abc")
+
+    with pytest.raises(ConnectionError, match="Port could not be cast"):
+        client.health()
 
 
 def test_falsey_custom_session_is_preserved() -> None:
@@ -313,8 +619,8 @@ def test_falsey_custom_session_is_preserved() -> None:
 @pytest.mark.parametrize(
     ("exception", "exc_type", "code"),
     [
-        (requests.Timeout("timed out"), RequestTimeoutError, "request_timeout"),
-        (requests.ConnectionError("connect failed"), ConnectionError, "connection_error"),
+        (TimeoutError("timed out"), RequestTimeoutError, "request_timeout"),
+        (OSError("connect failed"), ConnectionError, "connection_error"),
     ],
 )
 def test_get_transport_failures_raise_typed_exceptions(
@@ -332,8 +638,8 @@ def test_get_transport_failures_raise_typed_exceptions(
 @pytest.mark.parametrize(
     ("exception", "exc_type", "code"),
     [
-        (requests.Timeout("timed out"), RequestTimeoutError, "request_timeout"),
-        (requests.ConnectionError("connect failed"), ConnectionError, "connection_error"),
+        (TimeoutError("timed out"), RequestTimeoutError, "request_timeout"),
+        (OSError("connect failed"), ConnectionError, "connection_error"),
     ],
 )
 def test_post_transport_failures_raise_typed_exceptions(

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import json
 import re
+from http import client as http_client
 from typing import Any, Protocol
-
-import requests
+from urllib import error, parse
 
 from .exceptions import (
     BadRequestError,
@@ -28,6 +29,8 @@ _CODE_TO_EXC = {
 }
 
 MINIMUM_SUPPORTED_GOMC_REST_VERSION = "v0.6.0"
+_REDIRECT_STATUSES = {301, 302, 303, 307, 308}
+_MAX_REDIRECTS = 5
 
 
 class ResponseLike(Protocol):
@@ -48,6 +51,119 @@ class SessionLike(Protocol):
     def close(self) -> None: ...
 
 
+class _UrllibResponse:
+    def __init__(self, status_code: int, body: bytes) -> None:
+        self.status_code = status_code
+        self._body = body
+        self.text = body.decode("utf-8", errors="replace")
+
+    @property
+    def ok(self) -> bool:
+        return 200 <= self.status_code < 300
+
+    def json(self) -> Any:
+        return json.loads(self.text)
+
+
+class _UrllibSession:
+    def __init__(self) -> None:
+        self._connections: dict[tuple[str, str, int | None, float | None], Any] = {}
+
+    def get(self, url: str, **kwargs: Any) -> ResponseLike:
+        return self._send("GET", url, **kwargs)
+
+    def post(self, url: str, **kwargs: Any) -> ResponseLike:
+        return self._send("POST", url, **kwargs)
+
+    def close(self) -> None:
+        for connection in self._connections.values():
+            connection.close()
+        self._connections.clear()
+
+    def _send(self, method: str, url: str, **kwargs: Any) -> ResponseLike:
+        params = kwargs.get("params")
+        timeout = kwargs.get("timeout")
+        json_body = kwargs.get("json")
+        current_url = _build_url(url, params)
+        current_method = method
+        headers: dict[str, str] = {}
+        current_data: bytes | None = None
+        if json_body is not None:
+            current_data = json.dumps(json_body).encode("utf-8")
+            headers["Content-Type"] = "application/json"
+        for _ in range(_MAX_REDIRECTS + 1):
+            parsed_url = parse.urlsplit(current_url)
+            connection = self._get_connection(parsed_url, timeout)
+            path = _request_target(parsed_url)
+            try:
+                connection.request(current_method, path, body=current_data, headers=headers)
+                response = connection.getresponse()
+                body = response.read()
+                location = response.getheader("Location")
+                if response.status in _REDIRECT_STATUSES and location:
+                    if hasattr(response, "close"):
+                        response.close()
+                    current_url = parse.urljoin(current_url, location)
+                    if response.status in {301, 302, 303} and current_method != "GET":
+                        current_method = "GET"
+                        current_data = None
+                        headers = {}
+                    continue
+                return _UrllibResponse(response.status, body)
+            except Exception:
+                self._drop_connection(parsed_url, timeout)
+                raise
+        raise OSError("too many redirects")
+
+    def _get_connection(
+        self, parsed_url: parse.SplitResult, timeout: float | None
+    ) -> http_client.HTTPConnection:
+        key = _connection_key(parsed_url, timeout)
+        connection = self._connections.get(key)
+        if connection is None:
+            scheme, host, port, _ = key
+            connection = _create_http_connection(scheme, host, port, timeout)
+            self._connections[key] = connection
+        return connection
+
+    def _drop_connection(self, parsed_url: parse.SplitResult, timeout: float | None) -> None:
+        try:
+            key = _connection_key(parsed_url, timeout)
+        except OSError:
+            return
+        connection = self._connections.pop(key, None)
+        if connection is not None:
+            connection.close()
+
+
+def _connection_key(
+    parsed_url: parse.SplitResult, timeout: float | None
+) -> tuple[str, str, int | None, float | None]:
+    scheme = parsed_url.scheme or "http"
+    host = parsed_url.hostname
+    if host is None:
+        raise OSError("host is required")
+    try:
+        port = parsed_url.port
+    except ValueError as exc:
+        raise OSError(str(exc)) from exc
+    return (scheme, host, port, timeout)
+
+
+def _create_http_connection(
+    scheme: str, host: str, port: int | None, timeout: float | None
+) -> http_client.HTTPConnection:
+    if scheme == "https":
+        return http_client.HTTPSConnection(host, port=port, timeout=timeout)
+    if scheme == "http":
+        return http_client.HTTPConnection(host, port=port, timeout=timeout)
+    raise OSError(f"unsupported URL scheme: {scheme}")
+
+
+def _create_default_session() -> SessionLike:
+    return _UrllibSession()
+
+
 class PLCClient:
     def __init__(
         self,
@@ -58,7 +174,7 @@ class PLCClient:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self._owned_session = session is None
-        self.session = requests.Session() if session is None else session
+        self.session = _create_default_session() if session is None else session
         self._cached_version: str | None = None
 
     def __enter__(self) -> PLCClient:
@@ -158,9 +274,17 @@ class PLCClient:
         request_method = self.session.get if method == "GET" else self.session.post
         try:
             return request_method(f"{self.base_url}{path}", timeout=self.timeout, **kwargs)
-        except requests.Timeout as exc:
+        except TimeoutError as exc:
             raise RequestTimeoutError(str(exc), 0, "request_timeout") from exc
-        except requests.RequestException as exc:
+        except error.URLError as exc:
+            if isinstance(exc.reason, TimeoutError):
+                raise RequestTimeoutError(str(exc), 0, "request_timeout") from exc
+            raise ConnectionError(str(exc), 0, "connection_error") from exc
+        except http_client.HTTPException as exc:
+            raise ConnectionError(str(exc), 0, "connection_error") from exc
+        except OSError as exc:
+            if isinstance(exc, TimeoutError):
+                raise RequestTimeoutError(str(exc), 0, "request_timeout") from exc
             raise ConnectionError(str(exc), 0, "connection_error") from exc
 
     def _read_values(self, response: ResponseLike) -> list[int] | list[bool]:
@@ -242,3 +366,18 @@ def _parse_semver(version: str) -> tuple[int, int, int]:
         raise ValueError(f"invalid version string: {version}")
     major, minor, patch = match.groups()
     return int(major), int(minor), int(patch)
+
+
+def _build_url(url: str, params: dict[str, Any] | None) -> str:
+    if not params:
+        return url
+    encoded_params = parse.urlencode(params)
+    separator = "&" if parse.urlsplit(url).query else "?"
+    return f"{url}{separator}{encoded_params}"
+
+
+def _request_target(parsed_url: parse.SplitResult) -> str:
+    path = parsed_url.path or "/"
+    if parsed_url.query:
+        return f"{path}?{parsed_url.query}"
+    return path
