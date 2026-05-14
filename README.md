@@ -1,5 +1,7 @@
 # gomc-rest-client
 
+[日本語版 README](https://github.com/Moge800/gomc_rest_client/blob/main/README_JP.md)
+
 Python 3.10+ client library for the latest gomc-rest HTTP API.
 
 This package wraps the synchronous REST endpoints exposed by gomc-rest for Mitsubishi PLC read, write, and remote-control operations using only the Python standard library, and converts API error responses into typed Python exceptions.
