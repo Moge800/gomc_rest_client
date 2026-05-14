@@ -59,6 +59,7 @@ class PLCClient:
         self.timeout = timeout
         self._owned_session = session is None
         self.session = requests.Session() if session is None else session
+        self._cached_version: str | None = None
 
     def __enter__(self) -> PLCClient:
         return self
@@ -78,11 +79,14 @@ class PLCClient:
         return _require_json_object(response)
 
     def version(self) -> str:
+        if self._cached_version is not None:
+            return self._cached_version
         response = self._request("GET", "/version")
         self._ensure_success(response)
         body = _require_json_object(response)
         version = body.get("version")
         if isinstance(version, str) and version:
+            self._cached_version = version
             return version
         raise PLCError(
             "response version must be a non-empty string",

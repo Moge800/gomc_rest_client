@@ -7,11 +7,11 @@ import pytest
 import requests
 
 from gomc_rest_client import (
+    MINIMUM_SUPPORTED_GOMC_REST_VERSION,
     BadRequestError,
     BusyError,
     ConnectionError,
     ForbiddenError,
-    MINIMUM_SUPPORTED_GOMC_REST_VERSION,
     PLCClient,
     PLCError,
     PLCProtocolError,
@@ -177,6 +177,17 @@ def test_is_supported_version(server_version: str, allow_dev: bool, expected: bo
 
     assert MINIMUM_SUPPORTED_GOMC_REST_VERSION == "v0.6.0"
     assert client.is_supported_version(allow_dev=allow_dev) is expected
+
+
+def test_version_helpers_reuse_cached_version() -> None:
+    session = FakeSession([FakeResponse(payload={"version": "v0.6.0"})])
+    client = PLCClient(session=session)
+
+    assert client.version() == "v0.6.0"
+    assert client.is_supported_version() is True
+    assert client.is_version_compatible("v0.6.0") is True
+    assert len(session.calls) == 1
+    assert session.calls[0]["url"] == "http://localhost:8080/version"
 
 
 @pytest.mark.parametrize(
