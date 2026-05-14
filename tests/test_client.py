@@ -94,6 +94,16 @@ class FakeUrlopenResponse:
         return None
 
 
+class TrackableBytesIO(io.BytesIO):
+    def __init__(self, initial_bytes: bytes) -> None:
+        super().__init__(initial_bytes)
+        self.was_closed = False
+
+    def close(self) -> None:
+        self.was_closed = True
+        super().close()
+
+
 def test_health_and_read_write_and_remote_requests() -> None:
     session = FakeSession(
         [
@@ -368,6 +378,27 @@ def test_urllib_session_returns_http_error_response(monkeypatch: pytest.MonkeyPa
     assert response.status_code == 403
     assert response.ok is False
     assert response.json() == {"status": 403, "error": "forbidden", "code": "forbidden"}
+
+
+def test_urllib_session_closes_http_error_after_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    body = TrackableBytesIO(b'{"status":403,"error":"forbidden","code":"forbidden"}')
+
+    def fake_urlopen(http_request: Any, timeout: float | None = None) -> FakeUrlopenResponse:
+        headers = Message()
+        raise error.HTTPError(
+            url=http_request.full_url,
+            code=403,
+            msg="Forbidden",
+            hdrs=headers,
+            fp=body,
+        )
+
+    monkeypatch.setattr("gomc_rest_client.client.request.urlopen", fake_urlopen)
+
+    response = _UrllibSession().get("http://localhost:8080/remote/run", timeout=3.5)
+
+    assert response.status_code == 403
+    assert body.was_closed is True
 
 
 @pytest.mark.parametrize(

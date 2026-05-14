@@ -88,7 +88,10 @@ class _UrllibSession:
             with request.urlopen(http_request, timeout=timeout) as response:
                 return _UrllibResponse(response.status, response.read())
         except error.HTTPError as exc:
-            return _UrllibResponse(exc.code, exc.read())
+            try:
+                return _UrllibResponse(exc.code, exc.read())
+            finally:
+                exc.close()
 
 
 def _create_default_session() -> SessionLike:
