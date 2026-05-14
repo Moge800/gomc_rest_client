@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Protocol
 
 import requests
@@ -25,6 +26,8 @@ _CODE_TO_EXC = {
     "request_canceled": RequestCanceledError,
     "request_timeout": RequestTimeoutError,
 }
+
+MINIMUM_SUPPORTED_GOMC_REST_VERSION = "v0.6.0"
 
 
 class ResponseLike(Protocol):
@@ -56,6 +59,7 @@ class PLCClient:
         self.timeout = timeout
         self._owned_session = session is None
         self.session = requests.Session() if session is None else session
+        self._cached_version: str | None = None
 
     def __enter__(self) -> PLCClient:
         return self
@@ -68,6 +72,42 @@ class PLCClient:
         response = self._request("GET", "/health")
         self._ensure_success(response)
         return _require_json_object(response)
+
+    def metrics(self) -> dict[str, Any]:
+        response = self._request("GET", "/metrics")
+        self._ensure_success(response)
+        return _require_json_object(response)
+
+    def version(self) -> str:
+        if self._cached_version is not None:
+            return self._cached_version
+        response = self._request("GET", "/version")
+        self._ensure_success(response)
+        body = _require_json_object(response)
+        version = body.get("version")
+        if isinstance(version, str) and version:
+            if version != "dev":
+                try:
+                    _parse_semver(version)
+                except ValueError as exc:
+                    raise PLCError(
+                        f"invalid server version string: {version}",
+                        response.status_code,
+                        "bad_response",
+                    ) from exc
+            self._cached_version = version
+            return version
+        raise PLCError(
+            "response version must be a non-empty string",
+            response.status_code,
+            "bad_response",
+        )
+
+    def is_version_compatible(self, minimum_version: str, *, allow_dev: bool = True) -> bool:
+        return _is_version_compatible(self.version(), minimum_version, allow_dev=allow_dev)
+
+    def is_supported_version(self, *, allow_dev: bool = True) -> bool:
+        return self.is_version_compatible(MINIMUM_SUPPORTED_GOMC_REST_VERSION, allow_dev=allow_dev)
 
     def read(
         self, addr: str, count: int = 1, *, dword: bool = False, sint: bool = False
@@ -185,3 +225,20 @@ def _status_from_body(body: dict[str, Any], fallback_status: int) -> int:
         return int(body.get("status", fallback_status))
     except (TypeError, ValueError):
         return fallback_status
+
+
+_SEMVER_PATTERN = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
+
+
+def _is_version_compatible(server_version: str, minimum_version: str, *, allow_dev: bool) -> bool:
+    if server_version == "dev":
+        return allow_dev
+    return _parse_semver(server_version) >= _parse_semver(minimum_version)
+
+
+def _parse_semver(version: str) -> tuple[int, int, int]:
+    match = _SEMVER_PATTERN.fullmatch(version)
+    if match is None:
+        raise ValueError(f"invalid version string: {version}")
+    major, minor, patch = match.groups()
+    return int(major), int(minor), int(patch)

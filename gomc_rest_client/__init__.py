@@ -1,4 +1,4 @@
-from .client import PLCClient
+from .client import MINIMUM_SUPPORTED_GOMC_REST_VERSION, PLCClient
 from .exceptions import (
     BadRequestError,
     BusyError,
@@ -16,6 +16,7 @@ __all__ = [
     "BusyError",
     "ConnectionError",
     "ForbiddenError",
+    "MINIMUM_SUPPORTED_GOMC_REST_VERSION",
     "PLCClient",
     "PLCError",
     "PLCProtocolError",
