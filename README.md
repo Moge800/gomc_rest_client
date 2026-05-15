@@ -13,6 +13,7 @@ This package is a dedicated client library for gomc-rest. It is intended for use
 This library does not communicate with PLCs directly. If you need the server, API surface, or gomc-rest itself, see the upstream project:
 
 - https://github.com/Moge800/gomc-rest
+- https://pypi.org/project/gomc-rest-client/
 
 ## Install
 
@@ -25,6 +26,10 @@ With pip:
 ```bash
 pip install gomc-rest-client
 ```
+
+PyPI project page:
+
+- https://pypi.org/project/gomc-rest-client/
 
 For offline environments, install from a prebuilt wheel distributed inside your network:
 
