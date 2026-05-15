@@ -7,25 +7,25 @@ from typing import Any, Protocol
 from urllib import error, parse
 
 from .exceptions import (
-    BadRequestError,
-    BusyError,
-    ConnectionError,
-    ForbiddenError,
-    PLCError,
-    PLCProtocolError,
-    QueueClosedError,
-    RequestCanceledError,
-    RequestTimeoutError,
+    GomcRestBadRequestError,
+    GomcRestBusyError,
+    GomcRestConnectionError,
+    GomcRestError,
+    GomcRestForbiddenError,
+    GomcRestPLCProtocolError,
+    GomcRestQueueClosedError,
+    GomcRestRequestCanceledError,
+    GomcRestRequestTimeoutError,
 )
 
 _CODE_TO_EXC = {
-    "bad_request": BadRequestError,
-    "forbidden": ForbiddenError,
-    "connection_error": ConnectionError,
-    "busy": BusyError,
-    "queue_closed": QueueClosedError,
-    "request_canceled": RequestCanceledError,
-    "request_timeout": RequestTimeoutError,
+    "bad_request": GomcRestBadRequestError,
+    "forbidden": GomcRestForbiddenError,
+    "connection_error": GomcRestConnectionError,
+    "busy": GomcRestBusyError,
+    "queue_closed": GomcRestQueueClosedError,
+    "request_canceled": GomcRestRequestCanceledError,
+    "request_timeout": GomcRestRequestTimeoutError,
 }
 
 MINIMUM_SUPPORTED_GOMC_REST_VERSION = "v0.6.0"
@@ -206,14 +206,14 @@ class PLCClient:
                 try:
                     _parse_semver(version)
                 except ValueError as exc:
-                    raise PLCError(
+                    raise GomcRestError(
                         f"invalid server version string: {version}",
                         response.status_code,
                         "bad_response",
                     ) from exc
             self._cached_version = version
             return version
-        raise PLCError(
+        raise GomcRestError(
             "response version must be a non-empty string",
             response.status_code,
             "bad_response",
@@ -275,31 +275,35 @@ class PLCClient:
         try:
             return request_method(f"{self.base_url}{path}", timeout=self.timeout, **kwargs)
         except TimeoutError as exc:
-            raise RequestTimeoutError(str(exc), 0, "request_timeout") from exc
+            raise GomcRestRequestTimeoutError(str(exc), 0, "request_timeout") from exc
         except error.URLError as exc:
             if isinstance(exc.reason, TimeoutError):
-                raise RequestTimeoutError(str(exc), 0, "request_timeout") from exc
-            raise ConnectionError(str(exc), 0, "connection_error") from exc
+                raise GomcRestRequestTimeoutError(str(exc), 0, "request_timeout") from exc
+            raise GomcRestConnectionError(str(exc), 0, "connection_error") from exc
         except http_client.HTTPException as exc:
-            raise ConnectionError(str(exc), 0, "connection_error") from exc
+            raise GomcRestConnectionError(str(exc), 0, "connection_error") from exc
         except OSError as exc:
             if isinstance(exc, TimeoutError):
-                raise RequestTimeoutError(str(exc), 0, "request_timeout") from exc
-            raise ConnectionError(str(exc), 0, "connection_error") from exc
+                raise GomcRestRequestTimeoutError(str(exc), 0, "request_timeout") from exc
+            raise GomcRestConnectionError(str(exc), 0, "connection_error") from exc
 
     def _read_values(self, response: ResponseLike) -> list[int] | list[bool]:
         self._ensure_success(response)
         body = _require_json_object(response)
         if "values" not in body:
-            raise PLCError("response values are missing", response.status_code, "bad_response")
+            raise GomcRestError("response values are missing", response.status_code, "bad_response")
         values = body["values"]
         if not isinstance(values, list):
-            raise PLCError("response values must be a list", response.status_code, "bad_response")
+            raise GomcRestError(
+                "response values must be a list",
+                response.status_code,
+                "bad_response",
+            )
         if all(isinstance(value, bool) for value in values):
             return values
         if all(isinstance(value, int) and not isinstance(value, bool) for value in values):
             return values
-        raise PLCError(
+        raise GomcRestError(
             "response values must contain only ints or only bools",
             response.status_code,
             "bad_response",
@@ -317,8 +321,8 @@ def raise_for_error(response: ResponseLike) -> None:
     message = str(body.get("error", response.text))
     status = _status_from_body(body, response.status_code)
     if code == "plc_error":
-        raise PLCProtocolError(message, status, code, str(body.get("end_code", "")))
-    exc_class = _CODE_TO_EXC.get(code, PLCError)
+        raise GomcRestPLCProtocolError(message, status, code, str(body.get("end_code", "")))
+    exc_class = _CODE_TO_EXC.get(code, GomcRestError)
     raise exc_class(message, status, code)
 
 
@@ -334,14 +338,14 @@ def _require_json_object(response: ResponseLike) -> dict[str, Any]:
     try:
         body = response.json()
     except ValueError as exc:
-        raise PLCError(
+        raise GomcRestError(
             "response body must be a JSON object",
             response.status_code,
             "bad_response",
         ) from exc
     if isinstance(body, dict):
         return body
-    raise PLCError("response body must be a JSON object", response.status_code, "bad_response")
+    raise GomcRestError("response body must be a JSON object", response.status_code, "bad_response")
 
 
 def _status_from_body(body: dict[str, Any], fallback_status: int) -> int:

@@ -1,4 +1,4 @@
-class PLCError(Exception):
+class GomcRestError(Exception):
     """Base for all gomc_rest_client errors."""
 
     def __init__(self, message: str, status: int, code: str) -> None:
@@ -8,35 +8,35 @@ class PLCError(Exception):
         self.code = code
 
 
-class BadRequestError(PLCError):
+class GomcRestBadRequestError(GomcRestError):
     pass
 
 
-class ForbiddenError(PLCError):
+class GomcRestForbiddenError(GomcRestError):
     pass
 
 
-class PLCProtocolError(PLCError):
+class GomcRestPLCProtocolError(GomcRestError):
     def __init__(self, message: str, status: int, code: str, end_code: str) -> None:
         super().__init__(message, status, code)
         self.end_code = end_code
 
 
-class ConnectionError(PLCError):
+class GomcRestConnectionError(GomcRestError):
     pass
 
 
-class BusyError(PLCError):
+class GomcRestBusyError(GomcRestError):
     pass
 
 
-class QueueClosedError(PLCError):
+class GomcRestQueueClosedError(GomcRestError):
     pass
 
 
-class RequestCanceledError(PLCError):
+class GomcRestRequestCanceledError(GomcRestError):
     pass
 
 
-class RequestTimeoutError(PLCError):
+class GomcRestRequestTimeoutError(GomcRestError):
     pass
