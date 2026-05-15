@@ -51,9 +51,9 @@ uv build
 ```python
 from gomc_rest_client import (
     MINIMUM_SUPPORTED_GOMC_REST_VERSION,
-    BusyError,
+    GomcRestBusyError,
     PLCClient,
-    PLCProtocolError,
+    GomcRestPlcProtocolError,
 )
 
 with PLCClient("http://192.168.0.1:8080") as plc:
@@ -73,9 +73,9 @@ with PLCClient("http://192.168.0.1:8080") as plc:
 
     try:
         plc.remote_run(clear=0, force=False)
-    except BusyError:
+    except GomcRestBusyError:
         pass
-    except PLCProtocolError as exc:
+    except GomcRestPlcProtocolError as exc:
         print(exc.end_code, exc.message)
 ```
 

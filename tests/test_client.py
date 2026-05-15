@@ -9,16 +9,16 @@ import pytest
 
 from gomc_rest_client import (
     MINIMUM_SUPPORTED_GOMC_REST_VERSION,
-    BadRequestError,
-    BusyError,
-    ConnectionError,
-    ForbiddenError,
+    GomcRestBadRequestError,
+    GomcRestBusyError,
+    GomcRestConnectionError,
+    GomcRestError,
+    GomcRestForbiddenError,
+    GomcRestPlcProtocolError,
+    GomcRestQueueClosedError,
+    GomcRestRequestCanceledError,
+    GomcRestRequestTimeoutError,
     PLCClient,
-    PLCError,
-    PLCProtocolError,
-    QueueClosedError,
-    RequestCanceledError,
-    RequestTimeoutError,
 )
 from gomc_rest_client.client import _UrllibSession
 
@@ -193,7 +193,7 @@ def test_version_rejects_malformed_success_payload() -> None:
     session = FakeSession([FakeResponse(payload={"version": 123})])
     client = PLCClient(session=session)
 
-    with pytest.raises(PLCError) as exc_info:
+    with pytest.raises(GomcRestError) as exc_info:
         client.version()
 
     assert exc_info.value.code == "bad_response"
@@ -204,7 +204,7 @@ def test_is_version_compatible_rejects_malformed_server_version_as_bad_response(
     session = FakeSession([FakeResponse(payload={"version": "v0.6.0-rc1"})])
     client = PLCClient(session=session)
 
-    with pytest.raises(PLCError) as exc_info:
+    with pytest.raises(GomcRestError) as exc_info:
         client.is_version_compatible("v0.6.0")
 
     assert exc_info.value.code == "bad_response"
@@ -251,14 +251,14 @@ def test_version_helpers_reuse_cached_version() -> None:
 @pytest.mark.parametrize(
     ("code", "status", "exc_type"),
     [
-        ("bad_request", 400, BadRequestError),
-        ("forbidden", 403, ForbiddenError),
-        ("connection_error", 503, ConnectionError),
-        ("busy", 503, BusyError),
-        ("queue_closed", 503, QueueClosedError),
-        ("request_canceled", 499, RequestCanceledError),
-        ("request_timeout", 504, RequestTimeoutError),
-        ("unknown", 500, PLCError),
+        ("bad_request", 400, GomcRestBadRequestError),
+        ("forbidden", 403, GomcRestForbiddenError),
+        ("connection_error", 503, GomcRestConnectionError),
+        ("busy", 503, GomcRestBusyError),
+        ("queue_closed", 503, GomcRestQueueClosedError),
+        ("request_canceled", 499, GomcRestRequestCanceledError),
+        ("request_timeout", 504, GomcRestRequestTimeoutError),
+        ("unknown", 500, GomcRestError),
     ],
 )
 def test_error_dispatch(code: str, status: int, exc_type: type[Exception]) -> None:
@@ -294,7 +294,7 @@ def test_plc_protocol_error_captures_end_code() -> None:
     )
     client = PLCClient(session=session)
 
-    with pytest.raises(PLCProtocolError) as exc_info:
+    with pytest.raises(GomcRestPlcProtocolError) as exc_info:
         client.remote_reset()
 
     assert exc_info.value.end_code == "0x4000"
@@ -311,7 +311,7 @@ def test_health_raises_typed_error_for_non_2xx_response() -> None:
     )
     client = PLCClient(session=session)
 
-    with pytest.raises(ConnectionError):
+    with pytest.raises(GomcRestConnectionError):
         client.health()
 
 
@@ -329,7 +329,7 @@ def test_read_rejects_malformed_success_payload(payload: Any, error_message: str
     session = FakeSession([FakeResponse(payload=payload)])
     client = PLCClient(session=session)
 
-    with pytest.raises(PLCError) as exc_info:
+    with pytest.raises(GomcRestError) as exc_info:
         client.read("D100")
 
     assert exc_info.value.code == "bad_response"
@@ -556,15 +556,15 @@ def test_urllib_session_drops_cached_connection_after_failure(
 @pytest.mark.parametrize(
     ("exception", "exc_type", "code"),
     [
-        (TimeoutError("timed out"), RequestTimeoutError, "request_timeout"),
-        (http_client.BadStatusLine("bad status"), ConnectionError, "connection_error"),
-        (error.URLError("connect failed"), ConnectionError, "connection_error"),
+        (TimeoutError("timed out"), GomcRestRequestTimeoutError, "request_timeout"),
+        (http_client.BadStatusLine("bad status"), GomcRestConnectionError, "connection_error"),
+        (error.URLError("connect failed"), GomcRestConnectionError, "connection_error"),
     ],
 )
 def test_default_transport_failures_raise_typed_exceptions(
     monkeypatch: pytest.MonkeyPatch,
     exception: Exception,
-    exc_type: type[PLCError],
+    exc_type: type[GomcRestError],
     code: str,
 ) -> None:
     class RaisingHTTPConnection(FakeHTTPConnection):
@@ -597,14 +597,14 @@ def test_default_transport_failures_raise_typed_exceptions(
 def test_default_transport_rejects_unsupported_url_scheme() -> None:
     client = PLCClient("htps://localhost:8080")
 
-    with pytest.raises(ConnectionError, match="unsupported URL scheme: htps"):
+    with pytest.raises(GomcRestConnectionError, match="unsupported URL scheme: htps"):
         client.health()
 
 
 def test_default_transport_rejects_invalid_port() -> None:
     client = PLCClient("http://localhost:abc")
 
-    with pytest.raises(ConnectionError, match="Port could not be cast"):
+    with pytest.raises(GomcRestConnectionError, match="Port could not be cast"):
         client.health()
 
 
@@ -619,12 +619,12 @@ def test_falsey_custom_session_is_preserved() -> None:
 @pytest.mark.parametrize(
     ("exception", "exc_type", "code"),
     [
-        (TimeoutError("timed out"), RequestTimeoutError, "request_timeout"),
-        (OSError("connect failed"), ConnectionError, "connection_error"),
+        (TimeoutError("timed out"), GomcRestRequestTimeoutError, "request_timeout"),
+        (OSError("connect failed"), GomcRestConnectionError, "connection_error"),
     ],
 )
 def test_get_transport_failures_raise_typed_exceptions(
-    exception: Exception, exc_type: type[PLCError], code: str
+    exception: Exception, exc_type: type[GomcRestError], code: str
 ) -> None:
     client = PLCClient(session=RaisingSession(exception, "GET"))
 
@@ -638,12 +638,12 @@ def test_get_transport_failures_raise_typed_exceptions(
 @pytest.mark.parametrize(
     ("exception", "exc_type", "code"),
     [
-        (TimeoutError("timed out"), RequestTimeoutError, "request_timeout"),
-        (OSError("connect failed"), ConnectionError, "connection_error"),
+        (TimeoutError("timed out"), GomcRestRequestTimeoutError, "request_timeout"),
+        (OSError("connect failed"), GomcRestConnectionError, "connection_error"),
     ],
 )
 def test_post_transport_failures_raise_typed_exceptions(
-    exception: Exception, exc_type: type[PLCError], code: str
+    exception: Exception, exc_type: type[GomcRestError], code: str
 ) -> None:
     client = PLCClient(session=RaisingSession(exception, "POST"))
 
@@ -665,7 +665,7 @@ def test_error_dispatch_falls_back_to_response_status_for_invalid_body_status() 
     )
     client = PLCClient(session=session)
 
-    with pytest.raises(ConnectionError) as exc_info:
+    with pytest.raises(GomcRestConnectionError) as exc_info:
         client.remote_stop()
 
     assert exc_info.value.status == 503
