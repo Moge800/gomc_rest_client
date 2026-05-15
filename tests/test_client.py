@@ -135,7 +135,7 @@ def test_health_and_read_write_and_remote_requests() -> None:
                     "queue_length": 0,
                 }
             ),
-            FakeResponse(payload={"version": "v0.6.0"}),
+            FakeResponse(payload={"version": "v0.7.0"}),
             FakeResponse(payload={"values": [10, 20, 30]}),
             FakeResponse(payload={"ok": True}),
             FakeResponse(payload={"ok": True}),
@@ -155,7 +155,7 @@ def test_health_and_read_write_and_remote_requests() -> None:
         "avg_latency_ms": 1.5,
         "queue_length": 0,
     }
-    assert client.version() == "v0.6.0"
+    assert client.version() == "v0.7.0"
     assert client.read("D100", 3, dword=True, sint=True) == [10, 20, 30]
     client.write("D100", [1, 2], dword=True)
     client.remote_run(clear=2, force=True)
@@ -173,11 +173,13 @@ def test_health_and_read_write_and_remote_requests() -> None:
 @pytest.mark.parametrize(
     ("server_version", "minimum_version", "allow_dev", "expected"),
     [
-        ("v0.6.0", "v0.5.0", True, True),
+        ("v0.7.0", "v0.7.0", True, True),
+        ("v0.7.1", "v0.7.0", True, True),
+        ("v0.6.9", "v0.7.0", True, False),
         ("0.5.0", "v0.5.0", True, True),
         ("v0.4.9", "v0.5.0", True, False),
-        ("dev", "v0.5.0", True, True),
-        ("dev", "v0.5.0", False, False),
+        ("dev", "v0.7.0", True, True),
+        ("dev", "v0.7.0", False, False),
     ],
 )
 def test_is_version_compatible(
@@ -201,18 +203,18 @@ def test_version_rejects_malformed_success_payload() -> None:
 
 
 def test_is_version_compatible_rejects_malformed_server_version_as_bad_response() -> None:
-    session = FakeSession([FakeResponse(payload={"version": "v0.6.0-rc1"})])
+    session = FakeSession([FakeResponse(payload={"version": "v0.7.0-rc1"})])
     client = PLCClient(session=session)
 
     with pytest.raises(GomcRestError) as exc_info:
-        client.is_version_compatible("v0.6.0")
+        client.is_version_compatible("v0.7.0")
 
     assert exc_info.value.code == "bad_response"
-    assert exc_info.value.message == "invalid server version string: v0.6.0-rc1"
+    assert exc_info.value.message == "invalid server version string: v0.7.0-rc1"
 
 
 def test_is_version_compatible_rejects_invalid_minimum_version() -> None:
-    session = FakeSession([FakeResponse(payload={"version": "v0.6.0"})])
+    session = FakeSession([FakeResponse(payload={"version": "v0.7.0"})])
     client = PLCClient(session=session)
 
     with pytest.raises(ValueError, match="invalid version string: latest"):
@@ -222,9 +224,9 @@ def test_is_version_compatible_rejects_invalid_minimum_version() -> None:
 @pytest.mark.parametrize(
     ("server_version", "allow_dev", "expected"),
     [
-        ("v0.6.0", True, True),
-        ("v0.6.1", True, True),
-        ("v0.5.9", True, False),
+        ("v0.7.0", True, True),
+        ("v0.7.1", True, True),
+        ("v0.6.9", True, False),
         ("dev", True, True),
         ("dev", False, False),
     ],
@@ -233,17 +235,17 @@ def test_is_supported_version(server_version: str, allow_dev: bool, expected: bo
     session = FakeSession([FakeResponse(payload={"version": server_version})])
     client = PLCClient(session=session)
 
-    assert MINIMUM_SUPPORTED_GOMC_REST_VERSION == "v0.6.0"
+    assert MINIMUM_SUPPORTED_GOMC_REST_VERSION == "v0.7.0"
     assert client.is_supported_version(allow_dev=allow_dev) is expected
 
 
 def test_version_helpers_reuse_cached_version() -> None:
-    session = FakeSession([FakeResponse(payload={"version": "v0.6.0"})])
+    session = FakeSession([FakeResponse(payload={"version": "v0.7.0"})])
     client = PLCClient(session=session)
 
-    assert client.version() == "v0.6.0"
+    assert client.version() == "v0.7.0"
     assert client.is_supported_version() is True
-    assert client.is_version_compatible("v0.6.0") is True
+    assert client.is_version_compatible("v0.7.0") is True
     assert len(session.calls) == 1
     assert session.calls[0]["url"] == "http://localhost:8080/version"
 
