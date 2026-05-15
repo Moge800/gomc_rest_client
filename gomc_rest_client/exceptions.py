@@ -16,7 +16,7 @@ class GomcRestForbiddenError(GomcRestError):
     pass
 
 
-class GomcRestPlcProtocolError(GomcRestError):
+class GomcRestPLCProtocolError(GomcRestError):
     def __init__(self, message: str, status: int, code: str, end_code: str) -> None:
         super().__init__(message, status, code)
         self.end_code = end_code
@@ -40,3 +40,14 @@ class GomcRestRequestCanceledError(GomcRestError):
 
 class GomcRestRequestTimeoutError(GomcRestError):
     pass
+
+
+PLCError = GomcRestError
+BadRequestError = GomcRestBadRequestError
+ForbiddenError = GomcRestForbiddenError
+PLCProtocolError = GomcRestPLCProtocolError
+ConnectionError = GomcRestConnectionError
+BusyError = GomcRestBusyError
+QueueClosedError = GomcRestQueueClosedError
+RequestCanceledError = GomcRestRequestCanceledError
+RequestTimeoutError = GomcRestRequestTimeoutError

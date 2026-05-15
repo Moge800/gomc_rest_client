@@ -12,7 +12,7 @@ from .exceptions import (
     GomcRestConnectionError,
     GomcRestError,
     GomcRestForbiddenError,
-    GomcRestPlcProtocolError,
+    GomcRestPLCProtocolError,
     GomcRestQueueClosedError,
     GomcRestRequestCanceledError,
     GomcRestRequestTimeoutError,
@@ -321,7 +321,7 @@ def raise_for_error(response: ResponseLike) -> None:
     message = str(body.get("error", response.text))
     status = _status_from_body(body, response.status_code)
     if code == "plc_error":
-        raise GomcRestPlcProtocolError(message, status, code, str(body.get("end_code", "")))
+        raise GomcRestPLCProtocolError(message, status, code, str(body.get("end_code", "")))
     exc_class = _CODE_TO_EXC.get(code, GomcRestError)
     raise exc_class(message, status, code)
 

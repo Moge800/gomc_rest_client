@@ -14,7 +14,7 @@ from gomc_rest_client import (
     GomcRestConnectionError,
     GomcRestError,
     GomcRestForbiddenError,
-    GomcRestPlcProtocolError,
+    GomcRestPLCProtocolError,
     GomcRestQueueClosedError,
     GomcRestRequestCanceledError,
     GomcRestRequestTimeoutError,
@@ -294,7 +294,7 @@ def test_plc_protocol_error_captures_end_code() -> None:
     )
     client = PLCClient(session=session)
 
-    with pytest.raises(GomcRestPlcProtocolError) as exc_info:
+    with pytest.raises(GomcRestPLCProtocolError) as exc_info:
         client.remote_reset()
 
     assert exc_info.value.end_code == "0x4000"
