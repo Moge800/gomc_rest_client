@@ -87,9 +87,9 @@ with PLCClient("http://192.168.0.1:8080") as plc:
 
 ## Supported gomc-rest versions
 
-This client supports gomc-rest `v0.6.0` and later.
+This client supports gomc-rest `v0.7.0` and later.
 
-Servers older than `v0.6.0` are not supported. In particular, servers without the `/version` endpoint are out of scope for this client.
+Servers older than `v0.7.0` are not supported. In particular, servers without the `/version` endpoint are out of scope for this client.
 
 This client expects the server to expose both `/version` and `/metrics`.
 
