@@ -1,0 +1,619 @@
+openapi: "3.1.0"
+
+info:
+  title: gomc-rest
+  description: REST API gateway for Mitsubishi PLC (MC Protocol 3E/4E)
+  version: v0.7.0
+
+servers:
+  - url: http://localhost:8080
+
+components:
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [status, error, code]
+      properties:
+        status:
+          type: integer
+          example: 400
+        error:
+          type: string
+          example: "addr is required"
+        code:
+          type: string
+          example: "bad_request"
+
+    PLCErrorResponse:
+      type: object
+      required: [status, error, code]
+      properties:
+        status:
+          type: integer
+          example: 502
+        error:
+          type: string
+          example: "PLC error"
+        code:
+          type: string
+          enum: [plc_error]
+        end_code:
+          type: string
+          description: PLC end code; present only when the PLC returns a protocol-level error code
+          example: "0x4000"
+
+    OkResponse:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+          example: true
+
+  responses:
+    BadRequest:
+      description: Bad request (invalid or missing parameter)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            status: 400
+            error: "addr is required"
+            code: "bad_request"
+
+    Forbidden:
+      description: Operation not allowed (read-only mode or remote-control disabled)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            status: 403
+            error: "operation not allowed in read-only mode"
+            code: "forbidden"
+
+    RequestCanceled:
+      description: Client disconnected before the PLC operation completed
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            status: 499
+            error: "request canceled"
+            code: "request_canceled"
+
+    PLCError:
+      description: >
+        PLC error. `end_code` is present when the PLC returned a protocol-level
+        error code; absent for unclassified gateway errors.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/PLCErrorResponse"
+
+    ServiceUnavailable:
+      description: |
+        Server busy, PLC connection error, or queue closed.
+        - `busy`: PLC queue is full; retry after 1 s (Retry-After header set)
+        - `connection_error`: Cannot reach the PLC
+        - `queue_closed`: Server is shutting down
+      headers:
+        Retry-After:
+          description: Seconds to wait before retrying (only present for busy)
+          schema:
+            type: integer
+            example: 1
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            busy:
+              value:
+                status: 503
+                error: "PLC communication queue is full"
+                code: "busy"
+            connection_error:
+              value:
+                status: 503
+                error: "dial tcp: connection refused"
+                code: "connection_error"
+            queue_closed:
+              value:
+                status: 503
+                error: "PLC communication queue is closed"
+                code: "queue_closed"
+
+    RequestTimeout:
+      description: PLC did not respond within the configured timeout
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            status: 504
+            error: "request timed out"
+            code: "request_timeout"
+
+    RequestEntityTooLarge:
+      description: Request body exceeds the 1 MiB limit
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            status: 413
+            error: "body must not be larger than 1048576 bytes"
+            code: "bad_request"
+
+    MethodNotAllowed:
+      description: HTTP method not allowed for this endpoint
+      headers:
+        Allow:
+          description: The allowed HTTP methods for this endpoint (e.g. "GET, HEAD" or "POST")
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+paths:
+  /version:
+    get:
+      summary: Server version
+      description: Returns the server version string injected at build time.
+      operationId: getVersion
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [version]
+                properties:
+                  version:
+                    type: string
+                    example: "v0.7.0"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+
+  /health:
+    get:
+      summary: PLC connection health
+      description: Always returns HTTP 200 for GET requests. Check `connected` to determine PLC reachability.
+      operationId: getHealth
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [plc_status, connected]
+                properties:
+                  plc_status:
+                    type: string
+                    enum: [ok, disconnected]
+                    example: "ok"
+                  connected:
+                    type: boolean
+                    example: true
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+
+  /metrics:
+    get:
+      summary: Runtime metrics
+      description: Returns cumulative counters and average latency since process start.
+      operationId: getMetrics
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - request_count
+                  - reconnect_count
+                  - plc_error_count
+                  - avg_latency_ms
+                  - queue_length
+                properties:
+                  request_count:
+                    type: integer
+                    description: Total PLC operations attempted
+                    example: 1234
+                  reconnect_count:
+                    type: integer
+                    description: Total reconnect attempts
+                    example: 2
+                  plc_error_count:
+                    type: integer
+                    description: Total PLC errors (connection + protocol)
+                    example: 5
+                  avg_latency_ms:
+                    type: number
+                    format: double
+                    description: Average PLC round-trip latency in milliseconds
+                    example: 8.3
+                  queue_length:
+                    type: integer
+                    description: Current number of pending operations in the queue
+                    example: 0
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+
+  /read:
+    get:
+      summary: Read PLC device values
+      description: |
+        Read one or more values from a PLC device address.
+
+        **Word devices** (D, W, R, ZR, …): returns `list[int]`.
+        With `dword=true` reads pairs of registers as 32-bit unsigned integers.
+        With `sint=true` interprets values as signed (16-bit or 32-bit).
+
+        **Bit devices** (M, X, Y, B, …): returns `list[bool]`. `dword` and `sint` are not supported.
+      operationId: readDevice
+      parameters:
+        - name: addr
+          in: query
+          required: true
+          description: "PLC device address, e.g. `D100`, `M0`, `X1F`"
+          schema:
+            type: string
+            example: "D100"
+        - name: count
+          in: query
+          required: false
+          description: Number of values to read (default 1, max 1024; max 512 when dword=true)
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+            maximum: 1024
+            example: 5
+        - name: dword
+          in: query
+          required: false
+          description: "Read 32-bit double words (word devices only; reads count×2 registers; unsigned by default, signed with `sint=true`)"
+          schema:
+            type: boolean
+            default: false
+        - name: sint
+          in: query
+          required: false
+          description: Interpret values as signed integers (word devices only)
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [values]
+                properties:
+                  values:
+                    oneOf:
+                      - type: array
+                        items:
+                          type: integer
+                          format: int64
+                        description: Word device values
+                      - type: array
+                        items:
+                          type: boolean
+                        description: Bit device values
+              examples:
+                word_read:
+                  summary: Word device (D100, count=3)
+                  value:
+                    values: [10, 20, 30]
+                bit_read:
+                  summary: Bit device (M0, count=4)
+                  value:
+                    values: [true, false, true, false]
+                dword_read:
+                  summary: DWord device (D100, count=2, dword=true)
+                  value:
+                    values: [100000, 200000]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "499":
+          $ref: "#/components/responses/RequestCanceled"
+        "502":
+          $ref: "#/components/responses/PLCError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+        "504":
+          $ref: "#/components/responses/RequestTimeout"
+
+  /write:
+    post:
+      summary: Write PLC device values
+      description: |
+        Write one or more values to a PLC device address.
+
+        **Word devices**: body `values` must be `list[int]` (0–65535).
+        With `dword=true`: `values` is `list[int]` (0–4294967295, or −2147483648..2147483647 with `sint=true`).
+        With `sint=true`: `values` is `list[int]` (−32768–32767).
+
+        **Bit devices**: body `values` must be `list[bool]`.
+
+        Maximum items in `values`: 1024 for word/bit writes, 512 when `dword=true` (each value occupies two registers).
+
+        Requires server not started with `-readonly`.
+      operationId: writeDevice
+      parameters:
+        - name: addr
+          in: query
+          required: true
+          description: "PLC device address, e.g. `D100`, `M0`"
+          schema:
+            type: string
+            example: "D100"
+        - name: dword
+          in: query
+          required: false
+          description: "Write 32-bit double words (word devices only; unsigned by default, signed with `sint=true`)"
+          schema:
+            type: boolean
+            default: false
+        - name: sint
+          in: query
+          required: false
+          description: Treat values as signed integers (word devices only)
+          schema:
+            type: boolean
+            default: false
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [values]
+              properties:
+                values:
+                  oneOf:
+                    - type: array
+                      items:
+                        type: integer
+                        format: int64
+                      description: Word or dword values
+                    - type: array
+                      items:
+                        type: boolean
+                      description: Bit values
+                  minItems: 1
+                  maxItems: 1024
+            examples:
+              word_write:
+                summary: Write to word device
+                value:
+                  values: [10, 20, 30]
+              bit_write:
+                summary: Write to bit device
+                value:
+                  values: [true, false]
+              dword_write:
+                summary: Write dword values
+                value:
+                  values: [100000, 200000]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "413":
+          $ref: "#/components/responses/RequestEntityTooLarge"
+        "499":
+          $ref: "#/components/responses/RequestCanceled"
+        "502":
+          $ref: "#/components/responses/PLCError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+        "504":
+          $ref: "#/components/responses/RequestTimeout"
+
+  /remote/run:
+    post:
+      summary: Remote RUN
+      description: |
+        Puts the PLC into RUN mode.
+        Requires `-enable-remote` and server not started with `-readonly`.
+      operationId: remoteRun
+      parameters:
+        - name: clear
+          in: query
+          required: false
+          description: "Device clear mode: 0=no clear, 1=clear except latch, 2=clear all"
+          schema:
+            type: integer
+            enum: [0, 1, 2]
+            default: 0
+        - name: force
+          in: query
+          required: false
+          description: Force run even if another tool has control
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "499":
+          $ref: "#/components/responses/RequestCanceled"
+        "502":
+          $ref: "#/components/responses/PLCError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+        "504":
+          $ref: "#/components/responses/RequestTimeout"
+
+  /remote/stop:
+    post:
+      summary: Remote STOP
+      description: |
+        Puts the PLC into STOP mode.
+        Requires `-enable-remote` and server not started with `-readonly`.
+      operationId: remoteStop
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "499":
+          $ref: "#/components/responses/RequestCanceled"
+        "502":
+          $ref: "#/components/responses/PLCError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+        "504":
+          $ref: "#/components/responses/RequestTimeout"
+
+  /remote/pause:
+    post:
+      summary: Remote PAUSE
+      description: |
+        Puts the PLC into PAUSE mode.
+        Requires `-enable-remote` and server not started with `-readonly`.
+      operationId: remotePause
+      parameters:
+        - name: force
+          in: query
+          required: false
+          description: Force pause even if another tool has control
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "499":
+          $ref: "#/components/responses/RequestCanceled"
+        "502":
+          $ref: "#/components/responses/PLCError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+        "504":
+          $ref: "#/components/responses/RequestTimeout"
+
+  /remote/latch-clear:
+    post:
+      summary: Remote LATCH CLEAR
+      description: |
+        Clears the PLC latch memory.
+        Requires `-enable-remote` and server not started with `-readonly`.
+      operationId: remoteLatchClear
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "499":
+          $ref: "#/components/responses/RequestCanceled"
+        "502":
+          $ref: "#/components/responses/PLCError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+        "504":
+          $ref: "#/components/responses/RequestTimeout"
+
+  /remote/reset:
+    post:
+      summary: Remote RESET
+      description: |
+        Resets the PLC.
+        Requires `-enable-remote` and server not started with `-readonly`.
+      operationId: remoteReset
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "499":
+          $ref: "#/components/responses/RequestCanceled"
+        "502":
+          $ref: "#/components/responses/PLCError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+        "504":
+          $ref: "#/components/responses/RequestTimeout"
+
+  /openapi.yaml:
+    get:
+      summary: OpenAPI specification
+      description: Returns this OpenAPI specification as YAML.
+      operationId: getOpenAPI
+      responses:
+        "200":
+          description: OK
+          content:
+            application/yaml:
+              schema:
+                type: string
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
