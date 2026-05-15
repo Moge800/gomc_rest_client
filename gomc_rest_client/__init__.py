@@ -1,9 +1,5 @@
 from .client import MINIMUM_SUPPORTED_GOMC_REST_VERSION, PLCClient
 from .exceptions import (
-    BadRequestError,
-    BusyError,
-    ConnectionError,
-    ForbiddenError,
     GomcRestBadRequestError,
     GomcRestBusyError,
     GomcRestConnectionError,
@@ -13,17 +9,9 @@ from .exceptions import (
     GomcRestQueueClosedError,
     GomcRestRequestCanceledError,
     GomcRestRequestTimeoutError,
-    PLCError,
-    PLCProtocolError,
-    QueueClosedError,
-    RequestCanceledError,
-    RequestTimeoutError,
 )
 
 __all__ = [
-    "BadRequestError",
-    "BusyError",
-    "ConnectionError",
     "GomcRestBadRequestError",
     "GomcRestBusyError",
     "GomcRestConnectionError",
@@ -33,12 +21,6 @@ __all__ = [
     "GomcRestQueueClosedError",
     "GomcRestRequestCanceledError",
     "GomcRestRequestTimeoutError",
-    "ForbiddenError",
     "MINIMUM_SUPPORTED_GOMC_REST_VERSION",
     "PLCClient",
-    "PLCError",
-    "PLCProtocolError",
-    "QueueClosedError",
-    "RequestCanceledError",
-    "RequestTimeoutError",
 ]

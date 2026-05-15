@@ -40,14 +40,3 @@ class GomcRestRequestCanceledError(GomcRestError):
 
 class GomcRestRequestTimeoutError(GomcRestError):
     pass
-
-
-PLCError = GomcRestError
-BadRequestError = GomcRestBadRequestError
-ForbiddenError = GomcRestForbiddenError
-PLCProtocolError = GomcRestPLCProtocolError
-ConnectionError = GomcRestConnectionError
-BusyError = GomcRestBusyError
-QueueClosedError = GomcRestQueueClosedError
-RequestCanceledError = GomcRestRequestCanceledError
-RequestTimeoutError = GomcRestRequestTimeoutError
