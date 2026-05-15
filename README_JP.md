@@ -38,7 +38,9 @@ pip install dist/gomc_rest_client-*.whl
 
 このパッケージは Python 標準ライブラリ以外の実行時依存を持たないため、wheel を使ったオフライン導入がしやすい構成です。
 
-ローカル開発用:
+一方で、開発時には PyYAML、pytest、ruff、ty などの開発用依存を使いますが、これらは実行時には不要です。
+
+開発環境のセットアップ:
 
 ```bash
 uv sync --group dev

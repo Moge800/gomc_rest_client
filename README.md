@@ -38,7 +38,9 @@ pip install dist/gomc_rest_client-*.whl
 
 This package has no runtime dependencies outside the Python standard library, so wheel-based offline installation is straightforward.
 
-For local development:
+Development tasks currently use dev dependencies such as PyYAML, pytest, ruff, and ty, but they are not required at runtime.
+
+To set up the development environment:
 
 ```bash
 uv sync --group dev
