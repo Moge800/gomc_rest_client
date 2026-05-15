@@ -43,6 +43,25 @@ EXPECTED_QUERY_PARAMETERS = {
         "dword": {"required": False, "type": "boolean"},
         "sint": {"required": False, "type": "boolean"},
     },
+    "/remote/run": {
+        "clear": {"required": False, "type": "integer"},
+        "force": {"required": False, "type": "boolean"},
+    },
+    "/remote/pause": {
+        "force": {"required": False, "type": "boolean"},
+    },
+}
+
+EXPECTED_VERSION_RESPONSE_FIELDS = {
+    "version": {"type": "string"},
+}
+
+EXPECTED_METRICS_RESPONSE_FIELDS = {
+    "request_count": {"type": "integer"},
+    "reconnect_count": {"type": "integer"},
+    "plc_error_count": {"type": "integer"},
+    "avg_latency_ms": {"type": "number"},
+    "queue_length": {"type": "integer"},
 }
 
 EXPECTED_ERROR_CODES = {
@@ -195,8 +214,10 @@ def test_openapi_contract_uses_pinned_release_version() -> None:
 def test_openapi_contract_keeps_required_fields_for_version_and_metrics() -> None:
     spec = _load_openapi_spec()
 
-    version_required = _response_schema(spec, "/version", "get", "200").get("required", [])
-    metrics_required = _response_schema(spec, "/metrics", "get", "200").get("required", [])
+    version_schema = _response_schema(spec, "/version", "get", "200")
+    metrics_schema = _response_schema(spec, "/metrics", "get", "200")
+    version_required = version_schema.get("required", [])
+    metrics_required = metrics_schema.get("required", [])
 
     assert "version" in version_required
     assert set(metrics_required) >= {
@@ -206,6 +227,12 @@ def test_openapi_contract_keeps_required_fields_for_version_and_metrics() -> Non
         "avg_latency_ms",
         "queue_length",
     }
+
+    for name, expected in EXPECTED_VERSION_RESPONSE_FIELDS.items():
+        assert version_schema["properties"][name]["type"] == expected["type"]
+
+    for name, expected in EXPECTED_METRICS_RESPONSE_FIELDS.items():
+        assert metrics_schema["properties"][name]["type"] == expected["type"]
 
 
 def test_openapi_contract_keeps_client_required_read_and_write_fields() -> None:
