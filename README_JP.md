@@ -26,6 +26,10 @@ pip を使う場合:
 pip install gomc-rest-client
 ```
 
+PyPI の公開ページ:
+
+- https://pypi.org/project/gomc-rest-client/
+
 オフライン環境では、あらかじめネットワーク内へ配布した wheel からインストールできます。
 
 ```bash

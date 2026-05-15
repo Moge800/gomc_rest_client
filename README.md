@@ -26,6 +26,10 @@ With pip:
 pip install gomc-rest-client
 ```
 
+PyPI project page:
+
+- https://pypi.org/project/gomc-rest-client/
+
 For offline environments, install from a prebuilt wheel distributed inside your network:
 
 ```bash
