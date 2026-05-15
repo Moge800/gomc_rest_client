@@ -177,7 +177,7 @@ paths:
                 properties:
                   version:
                     type: string
-                    example: "v0.5.0"
+                    example: "v0.7.0"
         "405":
           $ref: "#/components/responses/MethodNotAllowed"
 
