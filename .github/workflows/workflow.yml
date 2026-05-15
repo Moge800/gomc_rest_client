@@ -56,7 +56,6 @@ jobs:
     if: github.event_name == 'release' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
-      contents: write
       id-token: write
 
     steps:
@@ -71,8 +70,23 @@ jobs:
         with:
           skip-existing: true
 
+  upload_release_assets:
+    needs:
+      - build
+      - publish
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
       - name: Upload release assets
-        if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
           files: |
