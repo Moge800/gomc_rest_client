@@ -3,7 +3,7 @@ openapi: "3.1.0"
 info:
   title: gomc-rest
   description: REST API gateway for Mitsubishi PLC (MC Protocol 3E/4E)
-  version: dev
+  version: v0.7.0
 
 servers:
   - url: http://localhost:8080

@@ -6,6 +6,7 @@ from typing import Any
 import yaml
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "gomc-rest-v0.7.0-openapi.yaml"
+PINNED_OPENAPI_VERSION = "v0.7.0"
 
 CLIENT_ROUTE_METHODS = {
     "/version": "get",
@@ -44,6 +45,10 @@ def _response_schema(
     ]
 
 
+def _operation(spec: dict[str, Any], path: str, method: str) -> dict[str, Any]:
+    return spec["paths"][path][method]
+
+
 def test_openapi_contract_covers_client_routes_and_methods() -> None:
     spec = _load_openapi_spec()
     paths = spec["paths"]
@@ -51,6 +56,12 @@ def test_openapi_contract_covers_client_routes_and_methods() -> None:
     for path, method in CLIENT_ROUTE_METHODS.items():
         assert path in paths
         assert method in paths[path]
+
+
+def test_openapi_contract_uses_pinned_release_version() -> None:
+    spec = _load_openapi_spec()
+
+    assert spec["info"]["version"] == PINNED_OPENAPI_VERSION
 
 
 def test_openapi_contract_keeps_required_fields_for_version_and_metrics() -> None:
@@ -67,6 +78,27 @@ def test_openapi_contract_keeps_required_fields_for_version_and_metrics() -> Non
         "avg_latency_ms",
         "queue_length",
     }
+
+
+def test_openapi_contract_keeps_client_required_read_and_write_fields() -> None:
+    spec = _load_openapi_spec()
+
+    read_operation = _operation(spec, "/read", "get")
+    write_operation = _operation(spec, "/write", "post")
+    read_response_required = _response_schema(spec, "/read", "get", "200").get("required", [])
+    read_addr = next(
+        parameter for parameter in read_operation["parameters"] if parameter["name"] == "addr"
+    )
+    write_addr = next(
+        parameter for parameter in write_operation["parameters"] if parameter["name"] == "addr"
+    )
+    write_body_schema = write_operation["requestBody"]["content"]["application/json"]["schema"]
+
+    assert "values" in read_response_required
+    assert read_addr["required"] is True
+    assert write_addr["required"] is True
+    assert write_operation["requestBody"]["required"] is True
+    assert "values" in write_body_schema.get("required", [])
 
 
 def test_openapi_contract_keeps_client_relevant_error_statuses() -> None:
