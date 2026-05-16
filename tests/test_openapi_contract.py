@@ -5,8 +5,8 @@ from typing import Any
 
 import yaml
 
-FIXTURE_PATH = Path(__file__).parent / "fixtures" / "gomc-rest-v0.7.0-openapi.yaml"
-PINNED_OPENAPI_VERSION = "v0.7.0"
+FIXTURE_PATH = Path(__file__).parent / "fixtures" / "gomc-rest-v0.8.0-openapi.yaml"
+PINNED_OPENAPI_VERSION = "v0.8.0"
 
 CLIENT_ROUTE_METHODS = {
     "/version": "get",
