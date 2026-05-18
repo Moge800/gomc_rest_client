@@ -3,7 +3,7 @@ openapi: "3.1.0"
 info:
   title: gomc-rest
   description: REST API gateway for Mitsubishi PLC (MC Protocol 3E/4E)
-  version: v0.8.0
+  version: v0.9.0
 
 servers:
   - url: http://localhost:8080
@@ -177,7 +177,67 @@ paths:
                 properties:
                   version:
                     type: string
-                    example: "v0.8.0"
+                    example: "v0.9.0"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+
+  /info:
+    get:
+      summary: Server info
+      description: |
+        Returns server configuration, gomcprotocol version, and reachable listen addresses.
+        `gomcprotocol_version` reflects the version embedded at build time; it may show `(devel)` for local `go run` or test builds.
+      operationId: getInfo
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - version
+                  - gomcprotocol_version
+                  - host
+                  - port
+                  - frame
+                  - transport
+                  - mode
+                  - listen_addrs
+                  - readonly
+                  - enable_remote
+                properties:
+                  version:
+                    type: string
+                    example: v0.9.0
+                  gomcprotocol_version:
+                    type: string
+                    example: "v0.3.0"
+                  host:
+                    type: string
+                    example: 192.168.0.1
+                  port:
+                    type: integer
+                    example: 5007
+                  frame:
+                    type: string
+                    enum: [3e, 4e]
+                  transport:
+                    type: string
+                    enum: [tcp, udp]
+                  mode:
+                    type: string
+                    enum: [binary, ascii]
+                  listen_addrs:
+                    type: array
+                    items:
+                      type: string
+                    description: Reachable IPv4 host:port addresses. Lists all non-loopback IPv4 addresses when bound to all interfaces.
+                    example: ["192.168.1.10:8080"]
+                  readonly:
+                    type: boolean
+                  enable_remote:
+                    type: boolean
         "405":
           $ref: "#/components/responses/MethodNotAllowed"
 
@@ -222,6 +282,7 @@ paths:
                   - reconnect_count
                   - plc_error_count
                   - avg_latency_ms
+                  - recent_avg_latency_ms
                   - queue_length
                 properties:
                   request_count:
@@ -239,8 +300,13 @@ paths:
                   avg_latency_ms:
                     type: number
                     format: double
-                    description: Average PLC round-trip latency in milliseconds
-                    example: 8.3
+                    description: Average PLC round-trip latency since process start, in milliseconds (2 decimal places)
+                    example: 8.33
+                  recent_avg_latency_ms:
+                    type: number
+                    format: double
+                    description: Average PLC round-trip latency for the most recent 100 requests, in milliseconds (2 decimal places)
+                    example: 7.12
                   queue_length:
                     type: integer
                     description: Current number of pending operations in the queue
@@ -265,14 +331,14 @@ paths:
         - name: addr
           in: query
           required: true
-          description: "PLC device address, e.g. `D100`, `M0`, `X1F`"
+          description: "PLC device address, e.g. `D100`, `M0`, `X1F`. Hex-addressed devices (X, Y, B, SB, W, SW, ZR, DX, DY) use hex numbers (e.g. `X4F`, `W1D`). Word devices support bit access with `.N` suffix (single hex digit 0–F), e.g. `D3500.0`; count must be 1 and returns `{\"values\":[true]}` or `{\"values\":[false]}`."
           schema:
             type: string
             example: "D100"
         - name: count
           in: query
           required: false
-          description: Number of values to read (default 1, max 1024; max 512 when dword=true)
+          description: Number of values to read (default 1, max 1024; max 512 when dword=true; must be 1 for bit access)
           schema:
             type: integer
             default: 1
@@ -360,7 +426,7 @@ paths:
         - name: addr
           in: query
           required: true
-          description: "PLC device address, e.g. `D100`, `M0`"
+          description: "PLC device address, e.g. `D100`, `M0`. Hex-addressed devices (X, Y, B, SB, W, SW, ZR, DX, DY) use hex numbers (e.g. `X4F`, `W1D`). Word devices support bit access with `.N` suffix (single hex digit 0–F), e.g. `D3500.0`; body must be `{\"values\":[true]}` or `{\"values\":[false]}`."
           schema:
             type: string
             example: "D100"

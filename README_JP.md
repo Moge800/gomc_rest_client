@@ -65,6 +65,7 @@ from gomc_rest_client import (
 with PLCClient("http://192.168.0.1:8080") as plc:
     health = plc.health()
     metrics = plc.metrics()
+    info = plc.info()
     version = plc.version()
     is_supported = plc.is_supported_version()
     is_compatible = plc.is_version_compatible(MINIMUM_SUPPORTED_GOMC_REST_VERSION)
@@ -89,17 +90,18 @@ with PLCClient("http://192.168.0.1:8080") as plc:
 
 ## 対応する gomc-rest バージョン
 
-このクライアントは gomc-rest `v0.8.0` 以降を対象としています。
+このクライアントは gomc-rest `v0.9.0` 以降を対象としています。
 
-`v0.8.0` より古いサーバーはサポート対象外です。特に `/version` エンドポイントを持たないサーバーは、このクライアントの対象外です。
+`v0.9.0` より古いサーバーはサポート対象外です。特に `/version` エンドポイントを持たないサーバーは、このクライアントの対象外です。
 
-このクライアントはサーバーが `/version` と `/metrics` の両方を提供している前提です。
+このクライアントはサーバーが `/version`、`/info`、`/metrics` を提供している前提です。
 
 実行時にサポート可否を確認したい場合は、`plc.is_supported_version()` を呼ぶか、`MINIMUM_SUPPORTED_GOMC_REST_VERSION` と比較してください。
 
 ## 対応 API
 
 - GET /version
+- GET /info
 - GET /metrics
 - GET /health
 - GET /read

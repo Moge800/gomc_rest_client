@@ -5,11 +5,12 @@ from typing import Any
 
 import yaml
 
-FIXTURE_PATH = Path(__file__).parent / "fixtures" / "gomc-rest-v0.8.0-openapi.yaml"
-PINNED_OPENAPI_VERSION = "v0.8.0"
+FIXTURE_PATH = Path(__file__).parent / "fixtures" / "gomc-rest-v0.9.0-openapi.yaml"
+PINNED_OPENAPI_VERSION = "v0.9.0"
 
 CLIENT_ROUTE_METHODS = {
     "/version": "get",
+    "/info": "get",
     "/metrics": "get",
     "/health": "get",
     "/read": "get",
@@ -52,6 +53,19 @@ EXPECTED_QUERY_PARAMETERS = {
     },
 }
 
+EXPECTED_INFO_RESPONSE_FIELDS = {
+    "version": {"type": "string"},
+    "gomcprotocol_version": {"type": "string"},
+    "host": {"type": "string"},
+    "port": {"type": "integer"},
+    "frame": {"type": "string"},
+    "transport": {"type": "string"},
+    "mode": {"type": "string"},
+    "listen_addrs": {"type": "array"},
+    "readonly": {"type": "boolean"},
+    "enable_remote": {"type": "boolean"},
+}
+
 EXPECTED_VERSION_RESPONSE_FIELDS = {
     "version": {"type": "string"},
 }
@@ -61,6 +75,7 @@ EXPECTED_METRICS_RESPONSE_FIELDS = {
     "reconnect_count": {"type": "integer"},
     "plc_error_count": {"type": "integer"},
     "avg_latency_ms": {"type": "number"},
+    "recent_avg_latency_ms": {"type": "number"},
     "queue_length": {"type": "integer"},
 }
 
@@ -211,22 +226,29 @@ def test_openapi_contract_uses_pinned_release_version() -> None:
     assert spec["info"]["version"] == PINNED_OPENAPI_VERSION
 
 
-def test_openapi_contract_keeps_required_fields_for_version_and_metrics() -> None:
+def test_openapi_contract_keeps_required_fields_for_info_version_and_metrics() -> None:
     spec = _load_openapi_spec()
 
+    info_schema = _response_schema(spec, "/info", "get", "200")
     version_schema = _response_schema(spec, "/version", "get", "200")
     metrics_schema = _response_schema(spec, "/metrics", "get", "200")
+    info_required = info_schema.get("required", [])
     version_required = version_schema.get("required", [])
     metrics_required = metrics_schema.get("required", [])
 
+    assert set(info_required) >= set(EXPECTED_INFO_RESPONSE_FIELDS)
     assert "version" in version_required
     assert set(metrics_required) >= {
         "request_count",
         "reconnect_count",
         "plc_error_count",
         "avg_latency_ms",
+        "recent_avg_latency_ms",
         "queue_length",
     }
+
+    for name, expected in EXPECTED_INFO_RESPONSE_FIELDS.items():
+        assert info_schema["properties"][name]["type"] == expected["type"]
 
     for name, expected in EXPECTED_VERSION_RESPONSE_FIELDS.items():
         assert version_schema["properties"][name]["type"] == expected["type"]
