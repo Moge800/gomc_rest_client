@@ -195,6 +195,17 @@ paths:
             application/json:
               schema:
                 type: object
+                required:
+                  - version
+                  - gomcprotocol_version
+                  - host
+                  - port
+                  - frame
+                  - transport
+                  - mode
+                  - listen_addrs
+                  - readonly
+                  - enable_remote
                 properties:
                   version:
                     type: string

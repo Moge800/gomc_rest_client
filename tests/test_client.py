@@ -183,6 +183,7 @@ def test_health_and_read_write_and_remote_requests() -> None:
         "readonly": False,
         "enable_remote": True,
     }
+    assert session.calls[2]["url"] == "http://localhost:8080/info"
     assert client.version() == "v0.9.0"
     assert client.read("D100", 3, dword=True, sint=True) == [10, 20, 30]
     client.write("D100", [1, 2], dword=True)

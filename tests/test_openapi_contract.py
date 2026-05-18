@@ -232,9 +232,11 @@ def test_openapi_contract_keeps_required_fields_for_info_version_and_metrics() -
     info_schema = _response_schema(spec, "/info", "get", "200")
     version_schema = _response_schema(spec, "/version", "get", "200")
     metrics_schema = _response_schema(spec, "/metrics", "get", "200")
+    info_required = info_schema.get("required", [])
     version_required = version_schema.get("required", [])
     metrics_required = metrics_schema.get("required", [])
 
+    assert set(info_required) >= set(EXPECTED_INFO_RESPONSE_FIELDS)
     assert "version" in version_required
     assert set(metrics_required) >= {
         "request_count",
