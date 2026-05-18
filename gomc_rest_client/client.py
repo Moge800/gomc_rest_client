@@ -28,7 +28,7 @@ _CODE_TO_EXC = {
     "request_timeout": GomcRestRequestTimeoutError,
 }
 
-MINIMUM_SUPPORTED_GOMC_REST_VERSION = "v0.8.0"
+MINIMUM_SUPPORTED_GOMC_REST_VERSION = "v0.9.0"
 _REDIRECT_STATUSES = {301, 302, 303, 307, 308}
 _MAX_REDIRECTS = 5
 
@@ -191,6 +191,11 @@ class PLCClient:
 
     def metrics(self) -> dict[str, Any]:
         response = self._request("GET", "/metrics")
+        self._ensure_success(response)
+        return _require_json_object(response)
+
+    def info(self) -> dict[str, Any]:
+        response = self._request("GET", "/info")
         self._ensure_success(response)
         return _require_json_object(response)
 
