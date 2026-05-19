@@ -28,7 +28,7 @@ _CODE_TO_EXC = {
     "request_timeout": GomcRestRequestTimeoutError,
 }
 
-MINIMUM_SUPPORTED_GOMC_REST_VERSION = "v0.9.0"
+MINIMUM_SUPPORTED_GOMC_REST_VERSION = "v0.10.0"
 _REDIRECT_STATUSES = {301, 302, 303, 307, 308}
 _MAX_REDIRECTS = 5
 
@@ -252,6 +252,44 @@ class PLCClient:
             "/write",
             params={"addr": addr, "dword": dword, "sint": sint},
             json={"values": list(values)},
+        )
+
+    def random_read(
+        self, words: list[str] | None = None, dwords: list[str] | None = None
+    ) -> dict[str, list[int]]:
+        response = self._request(
+            "POST",
+            "/random-read",
+            json={"words": list(words or []), "dwords": list(dwords or [])},
+        )
+        self._ensure_success(response)
+        body = _require_json_object(response)
+        random_words = body.get("words")
+        random_dwords = body.get("dwords")
+        if not isinstance(random_words, list) or not all(
+            isinstance(value, int) and not isinstance(value, bool) for value in random_words
+        ):
+            raise GomcRestError("response words must be a list of ints", response.status_code, "bad_response")
+        if not isinstance(random_dwords, list) or not all(
+            isinstance(value, int) and not isinstance(value, bool) for value in random_dwords
+        ):
+            raise GomcRestError("response dwords must be a list of ints", response.status_code, "bad_response")
+        return {"words": random_words, "dwords": random_dwords}
+
+    def random_write(
+        self,
+        *,
+        words: list[dict[str, int | str]] | None = None,
+        dwords: list[dict[str, int | str]] | None = None,
+        bits: list[dict[str, bool | str]] | None = None,
+    ) -> None:
+        self._post_ok(
+            "/random-write",
+            json={
+                "words": list(words or []),
+                "dwords": list(dwords or []),
+                "bits": list(bits or []),
+            },
         )
 
     def remote_run(self, clear: int = 0, force: bool = False) -> None:

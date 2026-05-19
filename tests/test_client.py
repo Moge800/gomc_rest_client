@@ -134,6 +134,10 @@ def test_health_and_read_write_and_remote_requests() -> None:
                     "avg_latency_ms": 1.5,
                     "recent_avg_latency_ms": 1.25,
                     "queue_length": 0,
+                    "client_request_count": 2,
+                    "busy_count": 0,
+                    "client_avg_latency_ms": 2.5,
+                    "client_recent_avg_latency_ms": 2.0,
                 }
             ),
             FakeResponse(
@@ -170,6 +174,10 @@ def test_health_and_read_write_and_remote_requests() -> None:
         "avg_latency_ms": 1.5,
         "recent_avg_latency_ms": 1.25,
         "queue_length": 0,
+        "client_request_count": 2,
+        "busy_count": 0,
+        "client_avg_latency_ms": 2.5,
+        "client_recent_avg_latency_ms": 2.0,
     }
     assert client.info() == {
         "version": "v0.9.0",
@@ -243,16 +251,45 @@ def test_read_and_write_accept_v090_word_bit_access() -> None:
     assert session.calls[1]["json"] == {"values": [False]}
 
 
+def test_random_read_and_write_requests() -> None:
+    session = FakeSession(
+        [
+            FakeResponse(payload={"words": [100, 200], "dwords": [65536]}),
+            FakeResponse(payload={"ok": True}),
+        ]
+    )
+    client = PLCClient(session=session)
+
+    assert client.random_read(words=["D100", "D200"], dwords=["D300"]) == {
+        "words": [100, 200],
+        "dwords": [65536],
+    }
+    client.random_write(
+        words=[{"addr": "D100", "value": 10}],
+        dwords=[{"addr": "D300", "value": 65536}],
+        bits=[{"addr": "M0", "value": True}],
+    )
+
+    assert session.calls[0]["url"] == "http://localhost:8080/random-read"
+    assert session.calls[0]["json"] == {"words": ["D100", "D200"], "dwords": ["D300"]}
+    assert session.calls[1]["url"] == "http://localhost:8080/random-write"
+    assert session.calls[1]["json"] == {
+        "words": [{"addr": "D100", "value": 10}],
+        "dwords": [{"addr": "D300", "value": 65536}],
+        "bits": [{"addr": "M0", "value": True}],
+    }
+
+
 @pytest.mark.parametrize(
     ("server_version", "minimum_version", "allow_dev", "expected"),
     [
-        ("v0.9.0", "v0.9.0", True, True),
-        ("v0.9.1", "v0.9.0", True, True),
-        ("v0.8.9", "v0.9.0", True, False),
+        ("v0.10.0", "v0.10.0", True, True),
+        ("v0.10.1", "v0.10.0", True, True),
+        ("v0.9.9", "v0.10.0", True, False),
         ("0.5.0", "v0.5.0", True, True),
         ("v0.4.9", "v0.5.0", True, False),
-        ("dev", "v0.9.0", True, True),
-        ("dev", "v0.9.0", False, False),
+        ("dev", "v0.10.0", True, True),
+        ("dev", "v0.10.0", False, False),
     ],
 )
 def test_is_version_compatible(
@@ -276,18 +313,18 @@ def test_version_rejects_malformed_success_payload() -> None:
 
 
 def test_is_version_compatible_rejects_malformed_server_version_as_bad_response() -> None:
-    session = FakeSession([FakeResponse(payload={"version": "v0.9.0-rc1"})])
+    session = FakeSession([FakeResponse(payload={"version": "v0.10.0-rc1"})])
     client = PLCClient(session=session)
 
     with pytest.raises(GomcRestError) as exc_info:
-        client.is_version_compatible("v0.9.0")
+        client.is_version_compatible("v0.10.0")
 
     assert exc_info.value.code == "bad_response"
-    assert exc_info.value.message == "invalid server version string: v0.9.0-rc1"
+    assert exc_info.value.message == "invalid server version string: v0.10.0-rc1"
 
 
 def test_is_version_compatible_rejects_invalid_minimum_version() -> None:
-    session = FakeSession([FakeResponse(payload={"version": "v0.9.0"})])
+    session = FakeSession([FakeResponse(payload={"version": "v0.10.0"})])
     client = PLCClient(session=session)
 
     with pytest.raises(ValueError, match="invalid version string: latest"):
@@ -297,9 +334,9 @@ def test_is_version_compatible_rejects_invalid_minimum_version() -> None:
 @pytest.mark.parametrize(
     ("server_version", "allow_dev", "expected"),
     [
-        ("v0.9.0", True, True),
-        ("v0.9.1", True, True),
-        ("v0.8.9", True, False),
+        ("v0.10.0", True, True),
+        ("v0.10.1", True, True),
+        ("v0.9.9", True, False),
         ("dev", True, True),
         ("dev", False, False),
     ],
@@ -308,17 +345,17 @@ def test_is_supported_version(server_version: str, allow_dev: bool, expected: bo
     session = FakeSession([FakeResponse(payload={"version": server_version})])
     client = PLCClient(session=session)
 
-    assert MINIMUM_SUPPORTED_GOMC_REST_VERSION == "v0.9.0"
+    assert MINIMUM_SUPPORTED_GOMC_REST_VERSION == "v0.10.0"
     assert client.is_supported_version(allow_dev=allow_dev) is expected
 
 
 def test_version_helpers_reuse_cached_version() -> None:
-    session = FakeSession([FakeResponse(payload={"version": "v0.9.0"})])
+    session = FakeSession([FakeResponse(payload={"version": "v0.10.0"})])
     client = PLCClient(session=session)
 
-    assert client.version() == "v0.9.0"
+    assert client.version() == "v0.10.0"
     assert client.is_supported_version() is True
-    assert client.is_version_compatible("v0.9.0") is True
+    assert client.is_version_compatible("v0.10.0") is True
     assert len(session.calls) == 1
     assert session.calls[0]["url"] == "http://localhost:8080/version"
 

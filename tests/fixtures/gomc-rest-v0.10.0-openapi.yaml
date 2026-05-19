@@ -3,7 +3,7 @@ openapi: "3.1.0"
 info:
   title: gomc-rest
   description: REST API gateway for Mitsubishi PLC (MC Protocol 3E/4E)
-  version: v0.9.0
+  version: v0.10.0
 
 servers:
   - url: http://localhost:8080
@@ -177,7 +177,7 @@ paths:
                 properties:
                   version:
                     type: string
-                    example: "v0.9.0"
+                    example: "v0.10.0"
         "405":
           $ref: "#/components/responses/MethodNotAllowed"
 
@@ -209,7 +209,7 @@ paths:
                 properties:
                   version:
                     type: string
-                    example: v0.9.0
+                    example: v0.10.0
                   gomcprotocol_version:
                     type: string
                     example: "v0.3.0"
@@ -268,7 +268,12 @@ paths:
   /metrics:
     get:
       summary: Runtime metrics
-      description: Returns cumulative counters and average latency since process start.
+      description: |
+        Returns cumulative counters and latency averages since process start.
+
+        PLC fields (`request_count`, `avg_latency_ms`, `recent_avg_latency_ms`) measure only the PLC wire time.
+        Client fields (`client_request_count`, `client_avg_latency_ms`, `client_recent_avg_latency_ms`) measure the full round-trip including queue wait time.
+        `busy_count` counts requests rejected because the queue was full; these are excluded from client latency averages.
       operationId: getMetrics
       responses:
         "200":
@@ -284,6 +289,10 @@ paths:
                   - avg_latency_ms
                   - recent_avg_latency_ms
                   - queue_length
+                  - client_request_count
+                  - busy_count
+                  - client_avg_latency_ms
+                  - client_recent_avg_latency_ms
                 properties:
                   request_count:
                     type: integer
@@ -300,17 +309,35 @@ paths:
                   avg_latency_ms:
                     type: number
                     format: double
-                    description: Average PLC round-trip latency since process start, in milliseconds (2 decimal places)
+                    description: Average PLC wire latency since process start, in milliseconds (2 decimal places)
                     example: 8.33
                   recent_avg_latency_ms:
                     type: number
                     format: double
-                    description: Average PLC round-trip latency for the most recent 100 requests, in milliseconds (2 decimal places)
+                    description: Average PLC wire latency for the most recent 100 requests, in milliseconds (2 decimal places)
                     example: 7.12
                   queue_length:
                     type: integer
                     description: Current number of pending operations in the queue
                     example: 0
+                  client_request_count:
+                    type: integer
+                    description: Total HTTP requests to PLC endpoints (including busy rejections)
+                    example: 1300
+                  busy_count:
+                    type: integer
+                    description: Requests rejected because the queue was full
+                    example: 12
+                  client_avg_latency_ms:
+                    type: number
+                    format: double
+                    description: Average client-visible latency (queue wait + PLC) since process start, excluding busy rejections, in milliseconds (2 decimal places)
+                    example: 32.5
+                  client_recent_avg_latency_ms:
+                    type: number
+                    format: double
+                    description: Average client-visible latency for the most recent 100 non-busy requests, in milliseconds (2 decimal places)
+                    example: 28.1
         "405":
           $ref: "#/components/responses/MethodNotAllowed"
 
@@ -478,6 +505,168 @@ paths:
                 summary: Write dword values
                 value:
                   values: [100000, 200000]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "413":
+          $ref: "#/components/responses/RequestEntityTooLarge"
+        "499":
+          $ref: "#/components/responses/RequestCanceled"
+        "502":
+          $ref: "#/components/responses/PLCError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+        "504":
+          $ref: "#/components/responses/RequestTimeout"
+
+  /random-read:
+    post:
+      summary: Random read PLC device values
+      description: |
+        Read multiple non-contiguous word device addresses in a single MC Protocol request (command 0x0403).
+        `words` returns 16-bit unsigned values; `dwords` returns 32-bit unsigned values.
+        Only word devices (D, W, R, ZR, TN, STN, CN, Z, SW, SD) are supported.
+        Maximum 255 addresses per category. At least one of `words` or `dwords` must be non-empty.
+      operationId: randomRead
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                words:
+                  type: array
+                  items:
+                    type: string
+                  description: "Word device addresses to read as 16-bit values (e.g. [\"D100\", \"D200\"])"
+                  maxItems: 255
+                dwords:
+                  type: array
+                  items:
+                    type: string
+                  description: "Word device addresses to read as 32-bit values (e.g. [\"D300\"])"
+                  maxItems: 255
+            example:
+              words: ["D100", "D200"]
+              dwords: ["D300"]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [words, dwords]
+                properties:
+                  words:
+                    type: array
+                    items:
+                      type: integer
+                    description: 16-bit unsigned values in the order of the request
+                  dwords:
+                    type: array
+                    items:
+                      type: integer
+                      format: int64
+                    description: 32-bit unsigned values in the order of the request
+              example:
+                words: [1234, 5678]
+                dwords: [123456]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "413":
+          $ref: "#/components/responses/RequestEntityTooLarge"
+        "499":
+          $ref: "#/components/responses/RequestCanceled"
+        "502":
+          $ref: "#/components/responses/PLCError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+        "504":
+          $ref: "#/components/responses/RequestTimeout"
+
+  /random-write:
+    post:
+      summary: Random write PLC device values
+      description: |
+        Write multiple non-contiguous device addresses in one or two MC Protocol requests.
+        `words` and `dwords` use command 0x1402 (word/dword random write); `bits` uses command 0x1402 subcommand 0x0001 (bit random write).
+        Both commands are issued within a single serialized job.
+        `words` and `dwords` require word devices; `bits` requires bit devices.
+        Maximum 255 entries per array. At least one array must be non-empty.
+        Requires server not started with `-readonly`.
+      operationId: randomWrite
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                words:
+                  type: array
+                  items:
+                    type: object
+                    required: [addr, value]
+                    properties:
+                      addr:
+                        type: string
+                        description: Word device address
+                      value:
+                        type: integer
+                        minimum: 0
+                        maximum: 65535
+                  maxItems: 255
+                dwords:
+                  type: array
+                  items:
+                    type: object
+                    required: [addr, value]
+                    properties:
+                      addr:
+                        type: string
+                        description: Word device address
+                      value:
+                        type: integer
+                        format: int64
+                        minimum: 0
+                        maximum: 4294967295
+                  maxItems: 255
+                bits:
+                  type: array
+                  items:
+                    type: object
+                    required: [addr, value]
+                    properties:
+                      addr:
+                        type: string
+                        description: Bit device address
+                      value:
+                        type: boolean
+                  maxItems: 255
+            example:
+              words:
+                - addr: "D100"
+                  value: 1234
+              dwords:
+                - addr: "D300"
+                  value: 65536
+              bits:
+                - addr: "M0"
+                  value: true
       responses:
         "200":
           description: OK

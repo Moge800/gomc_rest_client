@@ -77,6 +77,12 @@ with PLCClient("http://192.168.0.1:8080") as plc:
     plc.write("D100", [10, 20, 30])
     plc.write("M0", [True, False])
     plc.write("D100", [-1, -32768, 32767], sint=True)
+    random_values = plc.random_read(words=["D100", "D200"], dwords=["D300"])
+    plc.random_write(
+        words=[{"addr": "D100", "value": 10}],
+        dwords=[{"addr": "D300", "value": 65536}],
+        bits=[{"addr": "M0", "value": True}],
+    )
 
     try:
         plc.remote_run(clear=0, force=False)
@@ -86,15 +92,43 @@ with PLCClient("http://192.168.0.1:8080") as plc:
         print(exc.end_code, exc.message)
 ```
 
+`random_write()` で複数アドレスを書きたい場合は、`words`、`dwords`、`bits` の各リストに `{ "addr": "...", "value": ... }` 形式の辞書を追加していきます。
+
+```python
+plc.random_write(
+    words=[
+        {"addr": "D100", "value": 10},
+        {"addr": "D200", "value": 20},
+    ],
+    dwords=[
+        {"addr": "D300", "value": 65536},
+        {"addr": "D302", "value": 123456},
+    ],
+    bits=[
+        {"addr": "M0", "value": True},
+        {"addr": "M10", "value": False},
+    ],
+)
+```
+
+`random_read()` は辞書ではなく、`words=["D100", "D200"]` のようなアドレス文字列のリストを渡します。
+
+`random_read()` の戻り値は、リクエスト順の `words` と `dwords` を持つ辞書です。
+
+```python
+result = plc.random_read(words=["D100", "D200"], dwords=["D300"])
+# {"words": [100, 200], "dwords": [65536]}
+```
+
 `is_supported_version()` と `is_version_compatible()` は、開発中の gomc-rest main ビルドを扱いやすくするため、デフォルトで `dev` ビルドを互換ありとして扱います。
 
 ## 対応する gomc-rest バージョン
 
-このクライアントは gomc-rest `v0.9.0` 以降を対象としています。
+このクライアントは gomc-rest `v0.10.0` 以降を対象としています。
 
-`v0.9.0` より古いサーバーはサポート対象外です。特に `/version` エンドポイントを持たないサーバーは、このクライアントの対象外です。
+`v0.10.0` より古いサーバーはサポート対象外です。特に `/version` エンドポイントを持たないサーバーは、このクライアントの対象外です。
 
-このクライアントはサーバーが `/version`、`/info`、`/metrics` を提供している前提です。
+このクライアントはサーバーが `/version`、`/info`、`/metrics`、`/random-read`、`/random-write` を提供している前提です。
 
 実行時にサポート可否を確認したい場合は、`plc.is_supported_version()` を呼ぶか、`MINIMUM_SUPPORTED_GOMC_REST_VERSION` と比較してください。
 
@@ -106,6 +140,8 @@ with PLCClient("http://192.168.0.1:8080") as plc:
 - GET /health
 - GET /read
 - POST /write
+- POST /random-read
+- POST /random-write
 - POST /remote/run
 - POST /remote/stop
 - POST /remote/pause
