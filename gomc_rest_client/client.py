@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from http import client as http_client
-from typing import Any, Protocol
+from typing import Any, Protocol, TypedDict
 from urllib import error, parse
 
 from .exceptions import (
@@ -49,6 +49,21 @@ class SessionLike(Protocol):
     def post(self, url: str, **kwargs: Any) -> ResponseLike: ...
 
     def close(self) -> None: ...
+
+
+class RandomWordWriteItem(TypedDict):
+    addr: str
+    value: int
+
+
+class RandomDWordWriteItem(TypedDict):
+    addr: str
+    value: int
+
+
+class RandomBitWriteItem(TypedDict):
+    addr: str
+    value: bool
 
 
 class _UrllibResponse:
@@ -257,6 +272,8 @@ class PLCClient:
     def random_read(
         self, words: list[str] | None = None, dwords: list[str] | None = None
     ) -> dict[str, list[int]]:
+        if not words and not dwords:
+            raise ValueError("random_read requires at least one word or dword address")
         response = self._request(
             "POST",
             "/random-read",
@@ -287,10 +304,12 @@ class PLCClient:
     def random_write(
         self,
         *,
-        words: list[dict[str, int | str]] | None = None,
-        dwords: list[dict[str, int | str]] | None = None,
-        bits: list[dict[str, bool | str]] | None = None,
+        words: list[RandomWordWriteItem] | None = None,
+        dwords: list[RandomDWordWriteItem] | None = None,
+        bits: list[RandomBitWriteItem] | None = None,
     ) -> None:
+        if not words and not dwords and not bits:
+            raise ValueError("random_write requires at least one word, dword, or bit item")
         self._post_ok(
             "/random-write",
             json={

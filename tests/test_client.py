@@ -280,6 +280,22 @@ def test_random_read_and_write_requests() -> None:
     }
 
 
+def test_random_read_requires_at_least_one_address() -> None:
+    client = PLCClient(session=FakeSession([]))
+
+    with pytest.raises(ValueError, match="random_read requires at least one word or dword address"):
+        client.random_read()
+
+
+def test_random_write_requires_at_least_one_item() -> None:
+    client = PLCClient(session=FakeSession([]))
+
+    with pytest.raises(
+        ValueError, match="random_write requires at least one word, dword, or bit item"
+    ):
+        client.random_write()
+
+
 @pytest.mark.parametrize(
     ("server_version", "minimum_version", "allow_dev", "expected"),
     [
