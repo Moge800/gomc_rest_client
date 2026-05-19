@@ -269,11 +269,19 @@ class PLCClient:
         if not isinstance(random_words, list) or not all(
             isinstance(value, int) and not isinstance(value, bool) for value in random_words
         ):
-            raise GomcRestError("response words must be a list of ints", response.status_code, "bad_response")
+            raise GomcRestError(
+                "response words must be a list of ints",
+                response.status_code,
+                "bad_response",
+            )
         if not isinstance(random_dwords, list) or not all(
             isinstance(value, int) and not isinstance(value, bool) for value in random_dwords
         ):
-            raise GomcRestError("response dwords must be a list of ints", response.status_code, "bad_response")
+            raise GomcRestError(
+                "response dwords must be a list of ints",
+                response.status_code,
+                "bad_response",
+            )
         return {"words": random_words, "dwords": random_dwords}
 
     def random_write(

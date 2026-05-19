@@ -294,8 +294,12 @@ def test_openapi_contract_keeps_client_required_read_and_write_fields() -> None:
     random_write_operation = _operation(spec, "/random-write", "post")
     read_response_required = _response_schema(spec, "/read", "get", "200").get("required", [])
     write_body_schema = write_operation["requestBody"]["content"]["application/json"]["schema"]
-    random_read_body_schema = random_read_operation["requestBody"]["content"]["application/json"]["schema"]
-    random_write_body_schema = random_write_operation["requestBody"]["content"]["application/json"]["schema"]
+    random_read_body_schema = random_read_operation["requestBody"]["content"][
+        "application/json"
+    ]["schema"]
+    random_write_body_schema = random_write_operation["requestBody"]["content"][
+        "application/json"
+    ]["schema"]
     random_read_response_required = _response_schema(spec, "/random-read", "post", "200").get(
         "required", []
     )
