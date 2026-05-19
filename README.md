@@ -126,7 +126,7 @@ result = plc.random_read(words=["D100", "D200"], dwords=["D300"])
 
 This client supports gomc-rest `v0.10.0` and later.
 
-Servers older than `v0.10.0` are not supported. In particular, servers without the `/version` endpoint are out of scope for this client.
+Servers older than `v0.10.0` are not supported because this client relies on the `v0.10.0` `/random-read` and `/random-write` endpoints, along with the newer metrics fields added in that release.
 
 This client expects the server to expose `/version`, `/info`, `/metrics`, `/random-read`, and `/random-write`.
 

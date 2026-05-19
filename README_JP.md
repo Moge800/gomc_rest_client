@@ -126,7 +126,7 @@ result = plc.random_read(words=["D100", "D200"], dwords=["D300"])
 
 このクライアントは gomc-rest `v0.10.0` 以降を対象としています。
 
-`v0.10.0` より古いサーバーはサポート対象外です。特に `/version` エンドポイントを持たないサーバーは、このクライアントの対象外です。
+`v0.10.0` より古いサーバーはサポート対象外です。このクライアントは `v0.10.0` で追加された `/random-read`、`/random-write`、および拡張された metrics フィールドに依存しています。
 
 このクライアントはサーバーが `/version`、`/info`、`/metrics`、`/random-read`、`/random-write` を提供している前提です。
 
