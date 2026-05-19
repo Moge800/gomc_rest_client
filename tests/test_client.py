@@ -142,7 +142,7 @@ def test_health_and_read_write_and_remote_requests() -> None:
             ),
             FakeResponse(
                 payload={
-                    "version": "v0.9.0",
+                    "version": "v0.10.0",
                     "gomcprotocol_version": "v0.3.0",
                     "host": "192.168.0.1",
                     "port": 5007,
@@ -154,7 +154,7 @@ def test_health_and_read_write_and_remote_requests() -> None:
                     "enable_remote": True,
                 }
             ),
-            FakeResponse(payload={"version": "v0.9.0"}),
+            FakeResponse(payload={"version": "v0.10.0"}),
             FakeResponse(payload={"values": [10, 20, 30]}),
             FakeResponse(payload={"ok": True}),
             FakeResponse(payload={"ok": True}),
@@ -180,7 +180,7 @@ def test_health_and_read_write_and_remote_requests() -> None:
         "client_recent_avg_latency_ms": 2.0,
     }
     assert client.info() == {
-        "version": "v0.9.0",
+        "version": "v0.10.0",
         "gomcprotocol_version": "v0.3.0",
         "host": "192.168.0.1",
         "port": 5007,
@@ -192,7 +192,7 @@ def test_health_and_read_write_and_remote_requests() -> None:
         "enable_remote": True,
     }
     assert session.calls[2]["url"] == "http://localhost:8080/info"
-    assert client.version() == "v0.9.0"
+    assert client.version() == "v0.10.0"
     assert client.read("D100", 3, dword=True, sint=True) == [10, 20, 30]
     client.write("D100", [1, 2], dword=True)
     client.remote_run(clear=2, force=True)
@@ -294,6 +294,30 @@ def test_random_write_requires_at_least_one_item() -> None:
         ValueError, match="random_write requires at least one word, dword, or bit item"
     ):
         client.random_write()
+
+
+@pytest.mark.parametrize(
+    ("payload", "error_message"),
+    [
+        ([], "response body must be a JSON object"),
+        ({}, "response words must be a list of ints"),
+        ({"words": "bad", "dwords": []}, "response words must be a list of ints"),
+        ({"words": [True], "dwords": []}, "response words must be a list of ints"),
+        ({"words": [1], "dwords": "bad"}, "response dwords must be a list of ints"),
+        ({"words": [1], "dwords": [False]}, "response dwords must be a list of ints"),
+    ],
+)
+def test_random_read_rejects_malformed_success_payload(
+    payload: Any, error_message: str
+) -> None:
+    session = FakeSession([FakeResponse(payload=payload)])
+    client = PLCClient(session=session)
+
+    with pytest.raises(GomcRestError) as exc_info:
+        client.random_read(words=["D100"])
+
+    assert exc_info.value.code == "bad_response"
+    assert exc_info.value.message == error_message
 
 
 @pytest.mark.parametrize(
