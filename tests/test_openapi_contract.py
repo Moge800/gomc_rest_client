@@ -5,8 +5,8 @@ from typing import Any
 
 import yaml
 
-FIXTURE_PATH = Path(__file__).parent / "fixtures" / "gomc-rest-v0.9.0-openapi.yaml"
-PINNED_OPENAPI_VERSION = "v0.9.0"
+FIXTURE_PATH = Path(__file__).parent / "fixtures" / "gomc-rest-v0.10.0-openapi.yaml"
+PINNED_OPENAPI_VERSION = "v0.10.0"
 
 CLIENT_ROUTE_METHODS = {
     "/version": "get",
@@ -15,6 +15,8 @@ CLIENT_ROUTE_METHODS = {
     "/health": "get",
     "/read": "get",
     "/write": "post",
+    "/random-read": "post",
+    "/random-write": "post",
     "/remote/run": "post",
     "/remote/stop": "post",
     "/remote/pause": "post",
@@ -25,6 +27,8 @@ CLIENT_ROUTE_METHODS = {
 EXPECTED_OPERATION_ERROR_STATUSES = {
     "/read": {"400", "499", "502", "503", "504"},
     "/write": {"400", "403", "413", "499", "502", "503", "504"},
+    "/random-read": {"400", "413", "499", "502", "503", "504"},
+    "/random-write": {"400", "403", "413", "499", "502", "503", "504"},
     "/remote/run": {"400", "403", "499", "502", "503", "504"},
     "/remote/stop": {"400", "403", "499", "502", "503", "504"},
     "/remote/pause": {"400", "403", "499", "502", "503", "504"},
@@ -77,6 +81,10 @@ EXPECTED_METRICS_RESPONSE_FIELDS = {
     "avg_latency_ms": {"type": "number"},
     "recent_avg_latency_ms": {"type": "number"},
     "queue_length": {"type": "integer"},
+    "client_request_count": {"type": "integer"},
+    "busy_count": {"type": "integer"},
+    "client_avg_latency_ms": {"type": "number"},
+    "client_recent_avg_latency_ms": {"type": "number"},
 }
 
 EXPECTED_ERROR_CODES = {
@@ -88,6 +96,23 @@ EXPECTED_ERROR_CODES = {
         "504": {"request_timeout"},
     },
     "/write": {
+        "400": {"bad_request"},
+        "403": {"forbidden"},
+        "413": {"bad_request"},
+        "499": {"request_canceled"},
+        "502": {"plc_error"},
+        "503": {"busy", "connection_error", "queue_closed"},
+        "504": {"request_timeout"},
+    },
+    "/random-read": {
+        "400": {"bad_request"},
+        "413": {"bad_request"},
+        "499": {"request_canceled"},
+        "502": {"plc_error"},
+        "503": {"busy", "connection_error", "queue_closed"},
+        "504": {"request_timeout"},
+    },
+    "/random-write": {
         "400": {"bad_request"},
         "403": {"forbidden"},
         "413": {"bad_request"},
@@ -245,6 +270,10 @@ def test_openapi_contract_keeps_required_fields_for_info_version_and_metrics() -
         "avg_latency_ms",
         "recent_avg_latency_ms",
         "queue_length",
+        "client_request_count",
+        "busy_count",
+        "client_avg_latency_ms",
+        "client_recent_avg_latency_ms",
     }
 
     for name, expected in EXPECTED_INFO_RESPONSE_FIELDS.items():
@@ -261,12 +290,28 @@ def test_openapi_contract_keeps_client_required_read_and_write_fields() -> None:
     spec = _load_openapi_spec()
 
     write_operation = _operation(spec, "/write", "post")
+    random_read_operation = _operation(spec, "/random-read", "post")
+    random_write_operation = _operation(spec, "/random-write", "post")
     read_response_required = _response_schema(spec, "/read", "get", "200").get("required", [])
     write_body_schema = write_operation["requestBody"]["content"]["application/json"]["schema"]
+    random_read_body_schema = random_read_operation["requestBody"]["content"][
+        "application/json"
+    ]["schema"]
+    random_write_body_schema = random_write_operation["requestBody"]["content"][
+        "application/json"
+    ]["schema"]
+    random_read_response_required = _response_schema(spec, "/random-read", "post", "200").get(
+        "required", []
+    )
 
     assert "values" in read_response_required
     assert write_operation["requestBody"]["required"] is True
     assert "values" in write_body_schema.get("required", [])
+    assert random_read_operation["requestBody"]["required"] is True
+    assert random_write_operation["requestBody"]["required"] is True
+    assert set(random_read_response_required) >= {"words", "dwords"}
+    assert set(random_read_body_schema.get("properties", {})) >= {"words", "dwords"}
+    assert set(random_write_body_schema.get("properties", {})) >= {"words", "dwords", "bits"}
 
     for path, expected_parameters in EXPECTED_QUERY_PARAMETERS.items():
         operation = _operation(spec, path, CLIENT_ROUTE_METHODS[path])
