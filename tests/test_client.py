@@ -312,7 +312,7 @@ def test_random_write_pairs_requires_at_least_one_item() -> None:
     client = PLCClient(session=FakeSession([]))
 
     with pytest.raises(
-        ValueError, match="random_write requires at least one word, dword, or bit item"
+        ValueError, match="random_write_pairs requires at least one word, dword, or bit item"
     ):
         client.random_write_pairs()
 

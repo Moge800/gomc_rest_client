@@ -331,6 +331,8 @@ class PLCClient:
         dwords: list[RandomDWordWritePair] | None = None,
         bits: list[RandomBitWritePair] | None = None,
     ) -> None:
+        if not words and not dwords and not bits:
+            raise ValueError("random_write_pairs requires at least one word, dword, or bit item")
         self.random_write(
             words=[{"addr": addr, "value": value} for addr, value in words or []],
             dwords=[{"addr": addr, "value": value} for addr, value in dwords or []],
