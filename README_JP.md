@@ -170,9 +170,3 @@ uv run ruff check .
 uv run ty check
 uv build
 ```
-
-PyPI 公開用の認証設定後は、次で公開できます。
-
-```bash
-uv publish
-```
