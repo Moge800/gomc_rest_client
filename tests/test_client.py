@@ -256,6 +256,7 @@ def test_random_read_and_write_requests() -> None:
         [
             FakeResponse(payload={"words": [100, 200], "dwords": [65536]}),
             FakeResponse(payload={"ok": True}),
+            FakeResponse(payload={"ok": True}),
         ]
     )
     client = PLCClient(session=session)
@@ -269,6 +270,11 @@ def test_random_read_and_write_requests() -> None:
         dwords=[{"addr": "D300", "value": 65536}],
         bits=[{"addr": "M0", "value": True}],
     )
+    client.random_write_pairs(
+        words=[("D110", 11), ("D120", 12)],
+        dwords=[("D310", 65537)],
+        bits=[("M1", False)],
+    )
 
     assert session.calls[0]["url"] == "http://localhost:8080/random-read"
     assert session.calls[0]["json"] == {"words": ["D100", "D200"], "dwords": ["D300"]}
@@ -277,6 +283,12 @@ def test_random_read_and_write_requests() -> None:
         "words": [{"addr": "D100", "value": 10}],
         "dwords": [{"addr": "D300", "value": 65536}],
         "bits": [{"addr": "M0", "value": True}],
+    }
+    assert session.calls[2]["url"] == "http://localhost:8080/random-write"
+    assert session.calls[2]["json"] == {
+        "words": [{"addr": "D110", "value": 11}, {"addr": "D120", "value": 12}],
+        "dwords": [{"addr": "D310", "value": 65537}],
+        "bits": [{"addr": "M1", "value": False}],
     }
 
 
@@ -294,6 +306,15 @@ def test_random_write_requires_at_least_one_item() -> None:
         ValueError, match="random_write requires at least one word, dword, or bit item"
     ):
         client.random_write()
+
+
+def test_random_write_pairs_requires_at_least_one_item() -> None:
+    client = PLCClient(session=FakeSession([]))
+
+    with pytest.raises(
+        ValueError, match="random_write_pairs requires at least one word, dword, or bit item"
+    ):
+        client.random_write_pairs()
 
 
 @pytest.mark.parametrize(

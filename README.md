@@ -78,10 +78,10 @@ with PLCClient("http://192.168.0.1:8080") as plc:
     plc.write("M0", [True, False])
     plc.write("D100", [-1, -32768, 32767], sint=True)
     random_values = plc.random_read(words=["D100", "D200"], dwords=["D300"])
-    plc.random_write(
-        words=[{"addr": "D100", "value": 10}],
-        dwords=[{"addr": "D300", "value": 65536}],
-        bits=[{"addr": "M0", "value": True}],
+    plc.random_write_pairs(
+        words=[("D100", 10)],
+        dwords=[("D300", 65536)],
+        bits=[("M0", True)],
     )
 
     try:
@@ -92,7 +92,17 @@ with PLCClient("http://192.168.0.1:8080") as plc:
         print(exc.end_code, exc.message)
 ```
 
-If you want to write multiple non-contiguous addresses with `random_write()`, add more `{ "addr": "...", "value": ... }` dictionaries to the `words`, `dwords`, and `bits` lists.
+If you want to write multiple non-contiguous addresses, `random_write_pairs()` accepts `(addr, value)` pairs directly.
+
+```python
+plc.random_write_pairs(
+    words=[("D100", 10), ("D200", 20)],
+    dwords=[("D300", 65536), ("D302", 123456)],
+    bits=[("M0", True), ("M10", False)],
+)
+```
+
+If you prefer the server payload shape directly, `random_write()` still accepts `{ "addr": "...", "value": ... }` dictionaries.
 
 ```python
 plc.random_write(
