@@ -25,7 +25,7 @@ wheels = [
 
 [[package]]
 name = "gomc-rest-client"
-version = "0.6.0"
+version = "0.7.2"
 source = { editable = "." }
 
 [package.dev-dependencies]
