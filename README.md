@@ -170,9 +170,3 @@ uv run ruff check .
 uv run ty check
 uv build
 ```
-
-To publish to PyPI after configuring credentials:
-
-```bash
-uv publish
-```
