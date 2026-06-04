@@ -66,6 +66,11 @@ class RandomBitWriteItem(TypedDict):
     value: bool
 
 
+RandomWordWritePair = tuple[str, int]
+RandomDWordWritePair = tuple[str, int]
+RandomBitWritePair = tuple[str, bool]
+
+
 class _UrllibResponse:
     def __init__(self, status_code: int, body: bytes) -> None:
         self.status_code = status_code
@@ -317,6 +322,19 @@ class PLCClient:
                 "dwords": list(dwords or []),
                 "bits": list(bits or []),
             },
+        )
+
+    def random_write_pairs(
+        self,
+        *,
+        words: list[RandomWordWritePair] | None = None,
+        dwords: list[RandomDWordWritePair] | None = None,
+        bits: list[RandomBitWritePair] | None = None,
+    ) -> None:
+        self.random_write(
+            words=[{"addr": addr, "value": value} for addr, value in words or []],
+            dwords=[{"addr": addr, "value": value} for addr, value in dwords or []],
+            bits=[{"addr": addr, "value": value} for addr, value in bits or []],
         )
 
     def remote_run(self, clear: int = 0, force: bool = False) -> None:
