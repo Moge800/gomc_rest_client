@@ -26,12 +26,13 @@ jobs:
           TAG_VERSION: ${{ github.event.release.tag_name }}
         run: |
           python - <<'PY'
+          import os
           import pathlib
           import re
 
           pyproject_path = pathlib.Path("pyproject.toml")
           text = pyproject_path.read_text(encoding="utf-8")
-          tag_version = "${TAG_VERSION}".removeprefix("v")
+          tag_version = os.environ["TAG_VERSION"].removeprefix("v")
 
           updated_text, count = re.subn(
               r'(^\[project\]\n(?:.+\n)*?version = ")([^"]+)(")',
