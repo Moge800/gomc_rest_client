@@ -52,16 +52,22 @@ class SessionLike(Protocol):
 
 
 class RandomWordWriteItem(TypedDict):
+    """Word (16-bit) write item. ``addr``: device address, ``value``: int."""
+
     addr: str
     value: int
 
 
 class RandomDWordWriteItem(TypedDict):
+    """Double-word (32-bit) write item. ``addr``: device address, ``value``: int."""
+
     addr: str
     value: int
 
 
 class RandomBitWriteItem(TypedDict):
+    """Bit write item for bit devices (e.g. M-series). ``value``: bool (True=ON)."""
+
     addr: str
     value: bool
 
@@ -185,6 +191,22 @@ def _create_default_session() -> SessionLike:
 
 
 class PLCClient:
+    """HTTP client for the gomc-rest server.
+
+    Use as a context manager so the underlying HTTP connection is closed automatically.
+    The connection is only closed when the client owns the session (i.e. ``session``
+    was not passed in)::
+
+        with PLCClient("http://192.168.0.1:8080") as plc:
+            values = plc.read("D100", 3)
+
+    Args:
+        base_url: gomc-rest server URL. Defaults to ``"http://localhost:8080"``.
+        timeout: Socket timeout in seconds. Defaults to ``10.0``.
+        session: Custom session implementing :class:`SessionLike`. A built-in
+            urllib session is created and owned (closed on exit) when omitted.
+    """
+
     def __init__(
         self,
         base_url: str = "http://localhost:8080",
@@ -205,21 +227,25 @@ class PLCClient:
             self.session.close()
 
     def health(self) -> dict[str, Any]:
+        """Return the server health status."""
         response = self._request("GET", "/health")
         self._ensure_success(response)
         return _require_json_object(response)
 
     def metrics(self) -> dict[str, Any]:
+        """Return runtime metrics from the server."""
         response = self._request("GET", "/metrics")
         self._ensure_success(response)
         return _require_json_object(response)
 
     def info(self) -> dict[str, Any]:
+        """Return build and configuration info from the server."""
         response = self._request("GET", "/info")
         self._ensure_success(response)
         return _require_json_object(response)
 
     def version(self) -> str:
+        """Return the server version string (e.g. ``"v0.10.0"``). Result is cached."""
         if self._cached_version is not None:
             return self._cached_version
         response = self._request("GET", "/version")
@@ -245,14 +271,40 @@ class PLCClient:
         )
 
     def is_version_compatible(self, minimum_version: str, *, allow_dev: bool = True) -> bool:
+        """Return ``True`` if the server version >= *minimum_version*.
+
+        Args:
+            minimum_version: Required minimum version string, e.g. ``"v0.10.0"``.
+            allow_dev: Treat ``"dev"`` builds as compatible. Defaults to ``True``.
+        """
         return _is_version_compatible(self.version(), minimum_version, allow_dev=allow_dev)
 
     def is_supported_version(self, *, allow_dev: bool = True) -> bool:
+        """Return ``True`` if the server meets the library's minimum version requirement.
+
+        The minimum is :data:`MINIMUM_SUPPORTED_GOMC_REST_VERSION` (``"v0.10.0"``).
+        """
         return self.is_version_compatible(MINIMUM_SUPPORTED_GOMC_REST_VERSION, allow_dev=allow_dev)
 
     def read(
         self, addr: str, count: int = 1, *, dword: bool = False, sint: bool = False
     ) -> list[int] | list[bool]:
+        """Read *count* consecutive device values starting at *addr*.
+
+        Returns ``list[int]`` for word/dword devices, or ``list[bool]`` for bit
+        devices (e.g. M-series: ``True`` = ON, ``False`` = OFF).
+
+        Args:
+            addr: Starting device address (e.g. ``"D100"``, ``"M0"``).
+            count: Number of consecutive devices to read. Defaults to ``1``.
+            dword: Read as 32-bit double-word values.
+            sint: Read as signed integers.
+
+        Example::
+
+            words = plc.read("D100", 3)   # [10, 20, 30]
+            bits  = plc.read("M0", 4)     # [True, False, True, False]
+        """
         response = self._request(
             "GET",
             "/read",
@@ -268,6 +320,25 @@ class PLCClient:
         dword: bool = False,
         sint: bool = False,
     ) -> None:
+        """Write consecutive device values starting at *addr*.
+
+        Use ``list[int]`` for word/dword devices, or ``list[bool]`` for bit
+        devices (e.g. M-series: ``True`` = ON, ``False`` = OFF).
+
+        Args:
+            addr: Starting device address (e.g. ``"D100"``, ``"M0"``).
+            values: Values to write.
+            dword: Write as 32-bit double-word values.
+            sint: Write as signed integers.
+
+        Note:
+            Raises :exc:`GomcRestForbiddenError` if the server was started with ``-readonly``.
+
+        Example::
+
+            plc.write("D100", [10, 20, 30])
+            plc.write("M0", [True, False, True])
+        """
         self._post_ok(
             "/write",
             params={"addr": addr, "dword": dword, "sint": sint},
@@ -277,6 +348,20 @@ class PLCClient:
     def random_read(
         self, words: list[str] | None = None, dwords: list[str] | None = None
     ) -> dict[str, list[int]]:
+        """Read values from multiple non-consecutive addresses.
+
+        Returns ``{"words": [...], "dwords": [...]}`` with values in the same
+        order as the input lists. Requires gomc-rest >= ``v0.10.0``.
+
+        Args:
+            words: Word (16-bit) device addresses, e.g. ``["D100", "D200"]``.
+            dwords: Double-word (32-bit) device addresses, e.g. ``["D300"]``.
+
+        Example::
+
+            result = plc.random_read(words=["D100", "D200"], dwords=["D300"])
+            # {"words": [10, 20], "dwords": [65536]}
+        """
         if not words and not dwords:
             raise ValueError("random_read requires at least one word or dword address")
         response = self._request(
@@ -313,6 +398,26 @@ class PLCClient:
         dwords: list[RandomDWordWriteItem] | None = None,
         bits: list[RandomBitWriteItem] | None = None,
     ) -> None:
+        """Write values to multiple non-consecutive addresses using dict items.
+
+        Requires gomc-rest >= ``v0.10.0``.
+
+        Args:
+            words: Word write items, e.g. ``[{"addr": "D100", "value": 10}]``.
+            dwords: Double-word write items.
+            bits: Bit write items for bit devices (e.g. M-series).
+                ``True`` = ON, ``False`` = OFF.
+
+        Note:
+            Raises :exc:`GomcRestForbiddenError` if the server was started with ``-readonly``.
+
+        Example::
+
+            plc.random_write(
+                words=[{"addr": "D100", "value": 10}],
+                bits=[{"addr": "M0", "value": True}],
+            )
+        """
         if not words and not dwords and not bits:
             raise ValueError("random_write requires at least one word, dword, or bit item")
         self._post_ok(
@@ -331,6 +436,26 @@ class PLCClient:
         dwords: list[RandomDWordWritePair] | None = None,
         bits: list[RandomBitWritePair] | None = None,
     ) -> None:
+        """Write values to multiple non-consecutive addresses using ``(addr, value)`` tuples.
+
+        A concise alternative to :meth:`random_write`. Requires gomc-rest >= ``v0.10.0``.
+
+        Args:
+            words: ``(addr, int)`` tuples for word devices, e.g. ``[("D100", 10)]``.
+            dwords: ``(addr, int)`` tuples for double-word devices.
+            bits: ``(addr, bool)`` tuples for bit devices (e.g. M-series).
+                ``True`` = ON, ``False`` = OFF.
+
+        Note:
+            Raises :exc:`GomcRestForbiddenError` if the server was started with ``-readonly``.
+
+        Example::
+
+            plc.random_write_pairs(
+                words=[("D100", 10), ("D200", 20)],
+                bits=[("M0", True), ("M1", False)],
+            )
+        """
         if not words and not dwords and not bits:
             raise ValueError("random_write_pairs requires at least one word, dword, or bit item")
         self.random_write(
@@ -340,18 +465,42 @@ class PLCClient:
         )
 
     def remote_run(self, clear: int = 0, force: bool = False) -> None:
+        """Start the PLC program (RUN).
+
+        Requires ``-enable-remote`` on the server (not ``-readonly``).
+
+        Args:
+            clear: Clear mode before running (``0`` = none, ``1`` = clear, ``2`` = all-clear).
+            force: Force-run even if the PLC is in an error state.
+        """
         self._post_ok("/remote/run", params={"clear": clear, "force": force})
 
     def remote_stop(self) -> None:
+        """Stop the PLC program (STOP).
+
+        Requires ``-enable-remote`` on the server (not ``-readonly``).
+        """
         self._post_ok("/remote/stop")
 
     def remote_pause(self, force: bool = False) -> None:
+        """Pause the PLC program (PAUSE).
+
+        Requires ``-enable-remote`` on the server (not ``-readonly``).
+
+        Args:
+            force: Force-pause even when the PLC would normally reject it.
+        """
         self._post_ok("/remote/pause", params={"force": force})
 
     def remote_latch_clear(self) -> None:
+        """Clear the PLC latch memory.
+
+        Requires ``-enable-remote`` on the server (not ``-readonly``).
+        """
         self._post_ok("/remote/latch-clear")
 
     def remote_reset(self) -> None:
+        """Reset the PLC. Requires ``-enable-remote`` on the server (not ``-readonly``)."""
         self._post_ok("/remote/reset")
 
     def _post_ok(

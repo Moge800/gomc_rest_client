@@ -1,5 +1,11 @@
 class GomcRestError(Exception):
-    """Base for all gomc_rest_client errors."""
+    """Base exception for all gomc_rest_client errors.
+
+    Attributes:
+        message: Human-readable error description.
+        status: HTTP status code (0 if no response was received).
+        code: Machine-readable error code string from the server.
+    """
 
     def __init__(self, message: str, status: int, code: str) -> None:
         super().__init__(message)
@@ -9,34 +15,40 @@ class GomcRestError(Exception):
 
 
 class GomcRestBadRequestError(GomcRestError):
-    pass
+    """Raised on HTTP 400 — invalid address, out-of-range count, etc."""
 
 
 class GomcRestForbiddenError(GomcRestError):
-    pass
+    """Raised on HTTP 403 — operation not allowed (read-only mode or remote-control disabled)."""
 
 
 class GomcRestPLCProtocolError(GomcRestError):
+    """Raised when the PLC returns a protocol-level error.
+
+    Attributes:
+        end_code: PLC end code string (e.g. ``"0x4000"``).
+    """
+
     def __init__(self, message: str, status: int, code: str, end_code: str) -> None:
         super().__init__(message, status, code)
         self.end_code = end_code
 
 
 class GomcRestConnectionError(GomcRestError):
-    pass
+    """Raised when a network-level connection to the server fails."""
 
 
 class GomcRestBusyError(GomcRestError):
-    pass
+    """Raised when the server's request queue is full. Retry after a short delay."""
 
 
 class GomcRestQueueClosedError(GomcRestError):
-    pass
+    """Raised when the server's request queue has been closed (server shutting down)."""
 
 
 class GomcRestRequestCanceledError(GomcRestError):
-    pass
+    """Raised when the server canceled the request before completion."""
 
 
 class GomcRestRequestTimeoutError(GomcRestError):
-    pass
+    """Raised when the request timed out. Adjust ``PLCClient(timeout=...)`` if needed."""
