@@ -193,7 +193,9 @@ def _create_default_session() -> SessionLike:
 class PLCClient:
     """HTTP client for the gomc-rest server.
 
-    Use as a context manager to close the connection automatically::
+    Use as a context manager so the underlying HTTP connection is closed automatically.
+    The connection is only closed when the client owns the session (i.e. ``session``
+    was not passed in)::
 
         with PLCClient("http://192.168.0.1:8080") as plc:
             values = plc.read("D100", 3)
@@ -202,7 +204,7 @@ class PLCClient:
         base_url: gomc-rest server URL. Defaults to ``"http://localhost:8080"``.
         timeout: Socket timeout in seconds. Defaults to ``10.0``.
         session: Custom session implementing :class:`SessionLike`. A built-in
-            urllib session is used when omitted.
+            urllib session is created and owned (closed on exit) when omitted.
     """
 
     def __init__(
@@ -329,6 +331,9 @@ class PLCClient:
             dword: Write as 32-bit double-word values.
             sint: Write as signed integers.
 
+        Note:
+            Raises :exc:`GomcRestForbiddenError` if the server was started with ``-readonly``.
+
         Example::
 
             plc.write("D100", [10, 20, 30])
@@ -403,6 +408,9 @@ class PLCClient:
             bits: Bit write items for bit devices (e.g. M-series).
                 ``True`` = ON, ``False`` = OFF.
 
+        Note:
+            Raises :exc:`GomcRestForbiddenError` if the server was started with ``-readonly``.
+
         Example::
 
             plc.random_write(
@@ -438,6 +446,9 @@ class PLCClient:
             bits: ``(addr, bool)`` tuples for bit devices (e.g. M-series).
                 ``True`` = ON, ``False`` = OFF.
 
+        Note:
+            Raises :exc:`GomcRestForbiddenError` if the server was started with ``-readonly``.
+
         Example::
 
             plc.random_write_pairs(
@@ -454,7 +465,9 @@ class PLCClient:
         )
 
     def remote_run(self, clear: int = 0, force: bool = False) -> None:
-        """Start the PLC program (RUN). Requires ``-enable-remote`` on the server.
+        """Start the PLC program (RUN).
+
+        Requires ``-enable-remote`` on the server (not ``-readonly``).
 
         Args:
             clear: Clear mode before running (``0`` = none, ``1`` = clear, ``2`` = all-clear).
@@ -463,11 +476,16 @@ class PLCClient:
         self._post_ok("/remote/run", params={"clear": clear, "force": force})
 
     def remote_stop(self) -> None:
-        """Stop the PLC program (STOP). Requires ``-enable-remote`` on the server."""
+        """Stop the PLC program (STOP).
+
+        Requires ``-enable-remote`` on the server (not ``-readonly``).
+        """
         self._post_ok("/remote/stop")
 
     def remote_pause(self, force: bool = False) -> None:
-        """Pause the PLC program (PAUSE). Requires ``-enable-remote`` on the server.
+        """Pause the PLC program (PAUSE).
+
+        Requires ``-enable-remote`` on the server (not ``-readonly``).
 
         Args:
             force: Force-pause even when the PLC would normally reject it.
@@ -475,11 +493,14 @@ class PLCClient:
         self._post_ok("/remote/pause", params={"force": force})
 
     def remote_latch_clear(self) -> None:
-        """Clear the PLC latch memory. Requires ``-enable-remote`` on the server."""
+        """Clear the PLC latch memory.
+
+        Requires ``-enable-remote`` on the server (not ``-readonly``).
+        """
         self._post_ok("/remote/latch-clear")
 
     def remote_reset(self) -> None:
-        """Reset the PLC. Requires ``-enable-remote`` on the server."""
+        """Reset the PLC. Requires ``-enable-remote`` on the server (not ``-readonly``)."""
         self._post_ok("/remote/reset")
 
     def _post_ok(

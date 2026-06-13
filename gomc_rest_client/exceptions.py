@@ -19,14 +19,14 @@ class GomcRestBadRequestError(GomcRestError):
 
 
 class GomcRestForbiddenError(GomcRestError):
-    """Raised on HTTP 403 — remote-control endpoints require ``-enable-remote``."""
+    """Raised on HTTP 403 — operation not allowed (read-only mode or remote-control disabled)."""
 
 
 class GomcRestPLCProtocolError(GomcRestError):
     """Raised when the PLC returns a protocol-level error.
 
     Attributes:
-        end_code: PLC end code string (e.g. ``"C059"``).
+        end_code: PLC end code string (e.g. ``"0x4000"``).
     """
 
     def __init__(self, message: str, status: int, code: str, end_code: str) -> None:
