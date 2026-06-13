@@ -2,11 +2,8 @@ from .client import (
     MINIMUM_SUPPORTED_GOMC_REST_VERSION,
     PLCClient,
     RandomBitWriteItem,
-    RandomBitWritePair,
     RandomDWordWriteItem,
-    RandomDWordWritePair,
     RandomWordWriteItem,
-    RandomWordWritePair,
 )
 from .exceptions import (
     GomcRestBadRequestError,
@@ -33,9 +30,6 @@ __all__ = [
     "MINIMUM_SUPPORTED_GOMC_REST_VERSION",
     "PLCClient",
     "RandomBitWriteItem",
-    "RandomBitWritePair",
     "RandomDWordWriteItem",
-    "RandomDWordWritePair",
     "RandomWordWriteItem",
-    "RandomWordWritePair",
 ]
