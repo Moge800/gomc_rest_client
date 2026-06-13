@@ -522,8 +522,6 @@ class PLCClient:
         except http_client.HTTPException as exc:
             raise GomcRestConnectionError(str(exc), 0, "connection_error") from exc
         except OSError as exc:
-            if isinstance(exc, TimeoutError):
-                raise GomcRestRequestTimeoutError(str(exc), 0, "request_timeout") from exc
             raise GomcRestConnectionError(str(exc), 0, "connection_error") from exc
 
     def _read_values(self, response: ResponseLike) -> list[int] | list[bool]:
