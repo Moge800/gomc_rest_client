@@ -51,4 +51,4 @@ class GomcRestRequestCanceledError(GomcRestError):
 
 
 class GomcRestRequestTimeoutError(GomcRestError):
-    """Raised when the request timed out. Adjust ``PLCClient(timeout=...))`` if needed."""
+    """Raised when the request timed out. Adjust ``PLCClient(timeout=...)`` if needed."""
