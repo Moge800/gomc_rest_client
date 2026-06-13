@@ -2,15 +2,9 @@ class GomcRestError(Exception):
     """Base exception for all gomc_rest_client errors.
 
     Attributes:
-        message: Human-readable description of the error.
-        status: HTTP status code returned by the server (0 if no response).
-        code: Machine-readable error code string returned by the server.
-
-    Example:
-        >>> try:
-        ...     plc.read("D100", 1)
-        ... except GomcRestError as exc:
-        ...     print(exc.status, exc.code, exc.message)
+        message: Human-readable error description.
+        status: HTTP status code (0 if no response was received).
+        code: Machine-readable error code string from the server.
     """
 
     def __init__(self, message: str, status: int, code: str) -> None:
@@ -21,33 +15,18 @@ class GomcRestError(Exception):
 
 
 class GomcRestBadRequestError(GomcRestError):
-    """Raised when the server returns HTTP 400 Bad Request.
-
-    This typically means an invalid address, out-of-range count, or other
-    malformed request parameter was sent.
-    """
+    """Raised on HTTP 400 — invalid address, out-of-range count, etc."""
 
 
 class GomcRestForbiddenError(GomcRestError):
-    """Raised when the server returns HTTP 403 Forbidden.
-
-    Remote-control endpoints (``/remote/*``) require the server to be started
-    with the ``-enable-remote`` flag. Calling them without that flag raises
-    this error.
-    """
+    """Raised on HTTP 403 — remote-control endpoints require ``-enable-remote``."""
 
 
 class GomcRestPLCProtocolError(GomcRestError):
-    """Raised when the PLC itself returns a protocol-level error.
+    """Raised when the PLC returns a protocol-level error.
 
     Attributes:
-        end_code: The end code string returned by the PLC (e.g. ``"C059"``).
-
-    Example:
-        >>> try:
-        ...     plc.read("D100", 1)
-        ... except GomcRestPLCProtocolError as exc:
-        ...     print(f"PLC error {exc.end_code}: {exc.message}")
+        end_code: PLC end code string (e.g. ``"C059"``).
     """
 
     def __init__(self, message: str, status: int, code: str, end_code: str) -> None:
@@ -56,36 +35,20 @@ class GomcRestPLCProtocolError(GomcRestError):
 
 
 class GomcRestConnectionError(GomcRestError):
-    """Raised when a network-level connection to the gomc-rest server fails.
-
-    Common causes include the server not running, a wrong host/port, or a
-    firewall blocking the connection.
-    """
+    """Raised when a network-level connection to the server fails."""
 
 
 class GomcRestBusyError(GomcRestError):
-    """Raised when the gomc-rest server is temporarily busy.
-
-    The server serialises PLC requests through an internal queue. This error
-    occurs when that queue is full and the request could not be accepted.
-    Retrying after a short delay is usually sufficient.
-    """
+    """Raised when the server's request queue is full. Retry after a short delay."""
 
 
 class GomcRestQueueClosedError(GomcRestError):
-    """Raised when the gomc-rest server's internal request queue has been closed.
-
-    This usually means the server is shutting down.
-    """
+    """Raised when the server's request queue has been closed (server shutting down)."""
 
 
 class GomcRestRequestCanceledError(GomcRestError):
-    """Raised when the gomc-rest server canceled the request before completion."""
+    """Raised when the server canceled the request before completion."""
 
 
 class GomcRestRequestTimeoutError(GomcRestError):
-    """Raised when the request to the gomc-rest server timed out.
-
-    The timeout threshold is controlled by the ``timeout`` parameter of
-    :class:`PLCClient`.
-    """
+    """Raised when the request timed out. Adjust ``PLCClient(timeout=...))`` if needed."""

@@ -52,36 +52,21 @@ class SessionLike(Protocol):
 
 
 class RandomWordWriteItem(TypedDict):
-    """A single word (16-bit integer) write item for :meth:`PLCClient.random_write`.
-
-    Attributes:
-        addr: PLC word device address (e.g. ``"D100"``, ``"W1A"``).
-        value: 16-bit integer value to write.
-    """
+    """Word (16-bit) write item. ``addr``: device address, ``value``: int."""
 
     addr: str
     value: int
 
 
 class RandomDWordWriteItem(TypedDict):
-    """A single double-word (32-bit integer) write item for :meth:`PLCClient.random_write`.
-
-    Attributes:
-        addr: PLC double-word device address (e.g. ``"D100"``, ``"W1A"``).
-        value: 32-bit integer value to write.
-    """
+    """Double-word (32-bit) write item. ``addr``: device address, ``value``: int."""
 
     addr: str
     value: int
 
 
 class RandomBitWriteItem(TypedDict):
-    """A single bit write item for :meth:`PLCClient.random_write`.
-
-    Attributes:
-        addr: PLC bit device address (e.g. ``"M0"``, ``"X10"``).
-        value: Boolean value to write (``True`` = ON, ``False`` = OFF).
-    """
+    """Bit write item for bit devices (e.g. M-series). ``value``: bool (True=ON)."""
 
     addr: str
     value: bool
@@ -206,32 +191,18 @@ def _create_default_session() -> SessionLike:
 
 
 class PLCClient:
-    """HTTP client for the gomc-rest server that bridges Python to a Mitsubishi PLC.
+    """HTTP client for the gomc-rest server.
 
-    The client maps every gomc-rest endpoint to a Python method and converts
-    error responses into typed exceptions from :mod:`gomc_rest_client.exceptions`.
-
-    Use it as a context manager so the underlying HTTP connection is closed
-    automatically::
+    Use as a context manager to close the connection automatically::
 
         with PLCClient("http://192.168.0.1:8080") as plc:
             values = plc.read("D100", 3)
 
-    Or manage the lifecycle manually::
-
-        plc = PLCClient("http://192.168.0.1:8080")
-        try:
-            values = plc.read("D100", 3)
-        finally:
-            plc.session.close()
-
     Args:
-        base_url: Base URL of the gomc-rest server, e.g. ``"http://192.168.0.1:8080"``.
-            Trailing slashes are stripped automatically.
-        timeout: Socket timeout in seconds for every request. Defaults to ``10.0``.
-        session: Optional custom session implementing :class:`SessionLike`.
-            When ``None`` (default) an internal urllib-based session is created
-            and closed automatically when the context manager exits.
+        base_url: gomc-rest server URL. Defaults to ``"http://localhost:8080"``.
+        timeout: Socket timeout in seconds. Defaults to ``10.0``.
+        session: Custom session implementing :class:`SessionLike`. A built-in
+            urllib session is used when omitted.
     """
 
     def __init__(
@@ -254,83 +225,25 @@ class PLCClient:
             self.session.close()
 
     def health(self) -> dict[str, Any]:
-        """Return the health status of the gomc-rest server.
-
-        Returns:
-            A dict containing server health information, e.g.
-            ``{"status": "ok"}``.
-
-        Raises:
-            GomcRestConnectionError: If the server is unreachable.
-            GomcRestRequestTimeoutError: If the request times out.
-
-        Example:
-            >>> with PLCClient() as plc:
-            ...     print(plc.health())
-            {'status': 'ok'}
-        """
+        """Return the server health status."""
         response = self._request("GET", "/health")
         self._ensure_success(response)
         return _require_json_object(response)
 
     def metrics(self) -> dict[str, Any]:
-        """Return runtime metrics from the gomc-rest server.
-
-        Returns:
-            A dict containing server metrics such as request counts and
-            queue depths.
-
-        Raises:
-            GomcRestConnectionError: If the server is unreachable.
-            GomcRestRequestTimeoutError: If the request times out.
-
-        Example:
-            >>> with PLCClient() as plc:
-            ...     m = plc.metrics()
-            ...     print(m)
-        """
+        """Return runtime metrics from the server."""
         response = self._request("GET", "/metrics")
         self._ensure_success(response)
         return _require_json_object(response)
 
     def info(self) -> dict[str, Any]:
-        """Return build and configuration information from the gomc-rest server.
-
-        Returns:
-            A dict with server metadata, such as build version and enabled
-            feature flags.
-
-        Raises:
-            GomcRestConnectionError: If the server is unreachable.
-            GomcRestRequestTimeoutError: If the request times out.
-
-        Example:
-            >>> with PLCClient() as plc:
-            ...     print(plc.info())
-        """
+        """Return build and configuration info from the server."""
         response = self._request("GET", "/info")
         self._ensure_success(response)
         return _require_json_object(response)
 
     def version(self) -> str:
-        """Return the gomc-rest server version string.
-
-        The result is cached after the first call so subsequent calls do not
-        make an additional HTTP request.
-
-        Returns:
-            A semantic-version string such as ``"v0.10.0"``, or ``"dev"`` for
-            development builds.
-
-        Raises:
-            GomcRestError: If the server returns an unrecognised version format.
-            GomcRestConnectionError: If the server is unreachable.
-            GomcRestRequestTimeoutError: If the request times out.
-
-        Example:
-            >>> with PLCClient() as plc:
-            ...     print(plc.version())  # e.g. "v0.10.0"
-        """
+        """Return the server version string (e.g. ``"v0.10.0"``). Result is cached."""
         if self._cached_version is not None:
             return self._cached_version
         response = self._request("GET", "/version")
@@ -356,78 +269,39 @@ class PLCClient:
         )
 
     def is_version_compatible(self, minimum_version: str, *, allow_dev: bool = True) -> bool:
-        """Check whether the server version satisfies a minimum requirement.
+        """Return ``True`` if the server version >= *minimum_version*.
 
         Args:
-            minimum_version: The minimum acceptable version string, e.g.
-                ``"v0.10.0"``.
-            allow_dev: When ``True`` (default) a ``"dev"`` server version is
-                treated as compatible regardless of *minimum_version*.
-
-        Returns:
-            ``True`` if the server version is greater than or equal to
-            *minimum_version*.
-
-        Example:
-            >>> with PLCClient() as plc:
-            ...     if not plc.is_version_compatible("v0.10.0"):
-            ...         raise RuntimeError("Server too old")
+            minimum_version: Required minimum version string, e.g. ``"v0.10.0"``.
+            allow_dev: Treat ``"dev"`` builds as compatible. Defaults to ``True``.
         """
         return _is_version_compatible(self.version(), minimum_version, allow_dev=allow_dev)
 
     def is_supported_version(self, *, allow_dev: bool = True) -> bool:
-        """Check whether the server version meets the library's minimum requirement.
+        """Return ``True`` if the server meets the library's minimum version requirement.
 
-        The minimum version is :data:`MINIMUM_SUPPORTED_GOMC_REST_VERSION`
-        (currently ``"v0.10.0"``), which introduced the ``/random-read`` and
-        ``/random-write`` endpoints.
-
-        Args:
-            allow_dev: When ``True`` (default) a ``"dev"`` server version is
-                treated as supported.
-
-        Returns:
-            ``True`` if the server version is supported by this library.
-
-        Example:
-            >>> with PLCClient() as plc:
-            ...     if not plc.is_supported_version():
-            ...         raise RuntimeError("gomc-rest server version is too old")
+        The minimum is :data:`MINIMUM_SUPPORTED_GOMC_REST_VERSION` (``"v0.10.0"``).
         """
         return self.is_version_compatible(MINIMUM_SUPPORTED_GOMC_REST_VERSION, allow_dev=allow_dev)
 
     def read(
         self, addr: str, count: int = 1, *, dword: bool = False, sint: bool = False
     ) -> list[int] | list[bool]:
-        """Read consecutive device values starting at *addr*.
+        """Read *count* consecutive device values starting at *addr*.
+
+        Returns ``list[int]`` for word/dword devices, or ``list[bool]`` for bit
+        devices (e.g. M-series: ``True`` = ON, ``False`` = OFF).
 
         Args:
-            addr: Starting PLC device address (e.g. ``"D100"``, ``"M0"``).
+            addr: Starting device address (e.g. ``"D100"``, ``"M0"``).
             count: Number of consecutive devices to read. Defaults to ``1``.
-            dword: When ``True``, read double-word (32-bit) values. Each
-                device occupies two consecutive word addresses.
-            sint: When ``True``, read signed-integer values.
+            dword: Read as 32-bit double-word values.
+            sint: Read as signed integers.
 
-        Returns:
-            A list of ``int`` values for word/dword devices, or a list of
-            ``bool`` values for bit devices (e.g. M-series: ``M0``, ``M100``).
+        Example::
 
-        Raises:
-            GomcRestBadRequestError: If *addr* is invalid or *count* is
-                out of range.
-            GomcRestPLCProtocolError: If the PLC returns a protocol error.
-            GomcRestConnectionError: If the server is unreachable.
-            GomcRestRequestTimeoutError: If the request times out.
-
-        Example:
-            >>> with PLCClient() as plc:
-            ...     # Read 3 word values: D100, D101, D102
-            ...     words = plc.read("D100", 3)
-            ...     print(words)  # [10, 20, 30]
-            ...
-            ...     # Read 4 bit values: M0, M1, M2, M3
-            ...     bits = plc.read("M0", 4)
-            ...     print(bits)  # [True, False, True, False]
+            words = plc.read("D100", 3)   # [10, 20, 30]
+            bits  = plc.read("M0", 4)     # [True, False, True, False]
         """
         response = self._request(
             "GET",
@@ -446,28 +320,19 @@ class PLCClient:
     ) -> None:
         """Write consecutive device values starting at *addr*.
 
+        Use ``list[int]`` for word/dword devices, or ``list[bool]`` for bit
+        devices (e.g. M-series: ``True`` = ON, ``False`` = OFF).
+
         Args:
-            addr: Starting PLC device address (e.g. ``"D100"``, ``"M0"``).
-            values: Values to write. Use a ``list[int]`` for word/dword
-                devices and a ``list[bool]`` for bit devices (e.g. M-series:
-                ``True`` = ON, ``False`` = OFF).
-            dword: When ``True``, write double-word (32-bit) values.
-            sint: When ``True``, write signed-integer values.
+            addr: Starting device address (e.g. ``"D100"``, ``"M0"``).
+            values: Values to write.
+            dword: Write as 32-bit double-word values.
+            sint: Write as signed integers.
 
-        Raises:
-            GomcRestBadRequestError: If *addr* is invalid or *values* is
-                out of range.
-            GomcRestPLCProtocolError: If the PLC returns a protocol error.
-            GomcRestConnectionError: If the server is unreachable.
-            GomcRestRequestTimeoutError: If the request times out.
+        Example::
 
-        Example:
-            >>> with PLCClient() as plc:
-            ...     # Write word values to D100, D101, D102
-            ...     plc.write("D100", [10, 20, 30])
-            ...
-            ...     # Write bit values to M0, M1, M2 (True=ON, False=OFF)
-            ...     plc.write("M0", [True, False, True])
+            plc.write("D100", [10, 20, 30])
+            plc.write("M0", [True, False, True])
         """
         self._post_ok(
             "/write",
@@ -478,34 +343,19 @@ class PLCClient:
     def random_read(
         self, words: list[str] | None = None, dwords: list[str] | None = None
     ) -> dict[str, list[int]]:
-        """Read values from multiple non-consecutive word and/or dword addresses.
+        """Read values from multiple non-consecutive addresses.
 
-        Requires gomc-rest >= ``v0.10.0``.
+        Returns ``{"words": [...], "dwords": [...]}`` with values in the same
+        order as the input lists. Requires gomc-rest >= ``v0.10.0``.
 
         Args:
-            words: List of 16-bit word device addresses to read
-                (e.g. ``["D100", "D200"]``).
-            dwords: List of 32-bit double-word device addresses to read
-                (e.g. ``["D300"]``).
+            words: Word (16-bit) device addresses, e.g. ``["D100", "D200"]``.
+            dwords: Double-word (32-bit) device addresses, e.g. ``["D300"]``.
 
-        Returns:
-            A dict with two keys:
+        Example::
 
-            - ``"words"``: list of ``int`` values corresponding to *words*.
-            - ``"dwords"``: list of ``int`` values corresponding to *dwords*.
-
-        Raises:
-            ValueError: If both *words* and *dwords* are empty or ``None``.
-            GomcRestBadRequestError: If any address is invalid.
-            GomcRestPLCProtocolError: If the PLC returns a protocol error.
-            GomcRestConnectionError: If the server is unreachable.
-            GomcRestRequestTimeoutError: If the request times out.
-
-        Example:
-            >>> with PLCClient() as plc:
-            ...     result = plc.random_read(words=["D100", "D200"], dwords=["D300"])
-            ...     print(result["words"])   # [10, 20]
-            ...     print(result["dwords"])  # [65536]
+            result = plc.random_read(words=["D100", "D200"], dwords=["D300"])
+            # {"words": [10, 20], "dwords": [65536]}
         """
         if not words and not dwords:
             raise ValueError("random_read requires at least one word or dword address")
@@ -545,35 +395,20 @@ class PLCClient:
     ) -> None:
         """Write values to multiple non-consecutive addresses using dict items.
 
-        Each item is a :class:`RandomWordWriteItem`, :class:`RandomDWordWriteItem`,
-        or :class:`RandomBitWriteItem` dict with ``"addr"`` and ``"value"`` keys.
-
         Requires gomc-rest >= ``v0.10.0``.
 
         Args:
-            words: Word (16-bit) write items, e.g.
-                ``[{"addr": "D100", "value": 10}]``.
-            dwords: Double-word (32-bit) write items, e.g.
-                ``[{"addr": "D300", "value": 65536}]``.
-            bits: Bit write items for bit devices such as M-series.
-                Use ``True`` for ON, ``False`` for OFF, e.g.
-                ``[{"addr": "M0", "value": True}]``.
+            words: Word write items, e.g. ``[{"addr": "D100", "value": 10}]``.
+            dwords: Double-word write items.
+            bits: Bit write items for bit devices (e.g. M-series).
+                ``True`` = ON, ``False`` = OFF.
 
-        Raises:
-            ValueError: If all of *words*, *dwords*, and *bits* are empty or
-                ``None``.
-            GomcRestBadRequestError: If any address is invalid.
-            GomcRestPLCProtocolError: If the PLC returns a protocol error.
-            GomcRestConnectionError: If the server is unreachable.
-            GomcRestRequestTimeoutError: If the request times out.
+        Example::
 
-        Example:
-            >>> with PLCClient() as plc:
-            ...     plc.random_write(
-            ...         words=[{"addr": "D100", "value": 10}, {"addr": "D200", "value": 20}],
-            ...         dwords=[{"addr": "D300", "value": 65536}],
-            ...         bits=[{"addr": "M0", "value": True}],
-            ...     )
+            plc.random_write(
+                words=[{"addr": "D100", "value": 10}],
+                bits=[{"addr": "M0", "value": True}],
+            )
         """
         if not words and not dwords and not bits:
             raise ValueError("random_write requires at least one word, dword, or bit item")
@@ -595,35 +430,20 @@ class PLCClient:
     ) -> None:
         """Write values to multiple non-consecutive addresses using ``(addr, value)`` tuples.
 
-        A convenience wrapper around :meth:`random_write` that accepts plain
-        tuples instead of dicts, which is often more concise.
-
-        Requires gomc-rest >= ``v0.10.0``.
+        A concise alternative to :meth:`random_write`. Requires gomc-rest >= ``v0.10.0``.
 
         Args:
-            words: List of ``(addr, value)`` tuples for word (16-bit) devices,
-                e.g. ``[("D100", 10), ("D200", 20)]``.
-            dwords: List of ``(addr, value)`` tuples for double-word (32-bit)
-                devices, e.g. ``[("D300", 65536)]``.
-            bits: List of ``(addr, value)`` tuples for bit devices such as
-                M-series. Use ``True`` for ON, ``False`` for OFF, e.g.
-                ``[("M0", True), ("M1", False)]``.
+            words: ``(addr, int)`` tuples for word devices, e.g. ``[("D100", 10)]``.
+            dwords: ``(addr, int)`` tuples for double-word devices.
+            bits: ``(addr, bool)`` tuples for bit devices (e.g. M-series).
+                ``True`` = ON, ``False`` = OFF.
 
-        Raises:
-            ValueError: If all of *words*, *dwords*, and *bits* are empty or
-                ``None``.
-            GomcRestBadRequestError: If any address is invalid.
-            GomcRestPLCProtocolError: If the PLC returns a protocol error.
-            GomcRestConnectionError: If the server is unreachable.
-            GomcRestRequestTimeoutError: If the request times out.
+        Example::
 
-        Example:
-            >>> with PLCClient() as plc:
-            ...     plc.random_write_pairs(
-            ...         words=[("D100", 10), ("D200", 20)],
-            ...         dwords=[("D300", 65536)],
-            ...         bits=[("M0", True), ("M1", False)],
-            ...     )
+            plc.random_write_pairs(
+                words=[("D100", 10), ("D200", 20)],
+                bits=[("M0", True), ("M1", False)],
+            )
         """
         if not words and not dwords and not bits:
             raise ValueError("random_write_pairs requires at least one word, dword, or bit item")
@@ -634,108 +454,32 @@ class PLCClient:
         )
 
     def remote_run(self, clear: int = 0, force: bool = False) -> None:
-        """Start the PLC program (RUN).
-
-        Requires the gomc-rest server to be started with the ``-enable-remote``
-        flag. Calling this without that flag raises :exc:`GomcRestForbiddenError`.
+        """Start the PLC program (RUN). Requires ``-enable-remote`` on the server.
 
         Args:
-            clear: Clear mode before running (``0`` = no clear, ``1`` = clear,
-                ``2`` = all-clear). Defaults to ``0``.
-            force: When ``True``, force-run even if the PLC is in an error
-                state. Defaults to ``False``.
-
-        Raises:
-            GomcRestForbiddenError: If remote control is not enabled on the server.
-            GomcRestPLCProtocolError: If the PLC returns a protocol error.
-            GomcRestBusyError: If the server is temporarily busy.
-            GomcRestConnectionError: If the server is unreachable.
-            GomcRestRequestTimeoutError: If the request times out.
-
-        Example:
-            >>> with PLCClient() as plc:
-            ...     plc.remote_run(clear=0, force=False)
+            clear: Clear mode before running (``0`` = none, ``1`` = clear, ``2`` = all-clear).
+            force: Force-run even if the PLC is in an error state.
         """
         self._post_ok("/remote/run", params={"clear": clear, "force": force})
 
     def remote_stop(self) -> None:
-        """Stop the PLC program (STOP).
-
-        Requires the gomc-rest server to be started with the ``-enable-remote``
-        flag.
-
-        Raises:
-            GomcRestForbiddenError: If remote control is not enabled on the server.
-            GomcRestPLCProtocolError: If the PLC returns a protocol error.
-            GomcRestBusyError: If the server is temporarily busy.
-            GomcRestConnectionError: If the server is unreachable.
-            GomcRestRequestTimeoutError: If the request times out.
-
-        Example:
-            >>> with PLCClient() as plc:
-            ...     plc.remote_stop()
-        """
+        """Stop the PLC program (STOP). Requires ``-enable-remote`` on the server."""
         self._post_ok("/remote/stop")
 
     def remote_pause(self, force: bool = False) -> None:
-        """Pause the PLC program (PAUSE).
-
-        Requires the gomc-rest server to be started with the ``-enable-remote``
-        flag.
+        """Pause the PLC program (PAUSE). Requires ``-enable-remote`` on the server.
 
         Args:
-            force: When ``True``, force-pause even if the PLC is in a state
-                that would normally prevent pausing. Defaults to ``False``.
-
-        Raises:
-            GomcRestForbiddenError: If remote control is not enabled on the server.
-            GomcRestPLCProtocolError: If the PLC returns a protocol error.
-            GomcRestBusyError: If the server is temporarily busy.
-            GomcRestConnectionError: If the server is unreachable.
-            GomcRestRequestTimeoutError: If the request times out.
-
-        Example:
-            >>> with PLCClient() as plc:
-            ...     plc.remote_pause()
+            force: Force-pause even when the PLC would normally reject it.
         """
         self._post_ok("/remote/pause", params={"force": force})
 
     def remote_latch_clear(self) -> None:
-        """Clear the PLC latch memory.
-
-        Requires the gomc-rest server to be started with the ``-enable-remote``
-        flag.
-
-        Raises:
-            GomcRestForbiddenError: If remote control is not enabled on the server.
-            GomcRestPLCProtocolError: If the PLC returns a protocol error.
-            GomcRestBusyError: If the server is temporarily busy.
-            GomcRestConnectionError: If the server is unreachable.
-            GomcRestRequestTimeoutError: If the request times out.
-
-        Example:
-            >>> with PLCClient() as plc:
-            ...     plc.remote_latch_clear()
-        """
+        """Clear the PLC latch memory. Requires ``-enable-remote`` on the server."""
         self._post_ok("/remote/latch-clear")
 
     def remote_reset(self) -> None:
-        """Reset the PLC (equivalent to pressing the hardware RESET button).
-
-        Requires the gomc-rest server to be started with the ``-enable-remote``
-        flag.
-
-        Raises:
-            GomcRestForbiddenError: If remote control is not enabled on the server.
-            GomcRestPLCProtocolError: If the PLC returns a protocol error.
-            GomcRestBusyError: If the server is temporarily busy.
-            GomcRestConnectionError: If the server is unreachable.
-            GomcRestRequestTimeoutError: If the request times out.
-
-        Example:
-            >>> with PLCClient() as plc:
-            ...     plc.remote_reset()
-        """
+        """Reset the PLC. Requires ``-enable-remote`` on the server."""
         self._post_ok("/remote/reset")
 
     def _post_ok(
