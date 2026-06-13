@@ -614,7 +614,11 @@ def _parse_semver(version: str) -> tuple[int, int, int]:
 def _build_url(url: str, params: dict[str, Any] | None) -> str:
     if not params:
         return url
-    encoded_params = parse.urlencode(params)
+    normalized = {
+        key: ("true" if value else "false") if isinstance(value, bool) else value
+        for key, value in params.items()
+    }
+    encoded_params = parse.urlencode(normalized)
     separator = "&" if parse.urlsplit(url).query else "?"
     return f"{url}{separator}{encoded_params}"
 
