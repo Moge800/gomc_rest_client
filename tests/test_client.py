@@ -20,7 +20,7 @@ from gomc_rest_client import (
     GomcRestRequestTimeoutError,
     PLCClient,
 )
-from gomc_rest_client.client import _UrllibSession
+from gomc_rest_client.client import _build_url, _UrllibSession
 
 
 @dataclass
@@ -522,6 +522,15 @@ def test_context_manager_closes_owned_session() -> None:
     assert session.closed is True
 
 
+def test_build_url_encodes_booleans_as_lowercase() -> None:
+    url = _build_url(
+        "http://localhost:8080/read",
+        {"addr": "D100", "count": 3, "dword": True, "sint": False},
+    )
+
+    assert url == "http://localhost:8080/read?addr=D100&count=3&dword=true&sint=false"
+
+
 def test_urllib_session_builds_query_and_json_body(monkeypatch: pytest.MonkeyPatch) -> None:
     created_connections: list[FakeHTTPConnection] = []
 
@@ -551,7 +560,7 @@ def test_urllib_session_builds_query_and_json_body(monkeypatch: pytest.MonkeyPat
     assert created_connections[0].requests == [
         {
             "method": "POST",
-            "path": "/write?addr=D100&dword=True",
+            "path": "/write?addr=D100&dword=true",
             "body": b'{"values": [1, 2]}',
             "headers": {"Content-Type": "application/json"},
         }
