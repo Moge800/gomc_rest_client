@@ -28,7 +28,7 @@ _CODE_TO_EXC = {
     "request_timeout": GomcRestRequestTimeoutError,
 }
 
-MINIMUM_SUPPORTED_GOMC_REST_VERSION = "v0.10.0"
+MINIMUM_SUPPORTED_GOMC_REST_VERSION = "v1.3.0"
 _REDIRECT_STATUSES = {301, 302, 303, 307, 308}
 _MAX_REDIRECTS = 5
 
@@ -282,7 +282,7 @@ class PLCClient:
     def is_supported_version(self, *, allow_dev: bool = True) -> bool:
         """Return ``True`` if the server meets the library's minimum version requirement.
 
-        The minimum is :data:`MINIMUM_SUPPORTED_GOMC_REST_VERSION` (``"v0.10.0"``).
+        The minimum is :data:`MINIMUM_SUPPORTED_GOMC_REST_VERSION` (``"v1.3.0"``).
         """
         return self.is_version_compatible(MINIMUM_SUPPORTED_GOMC_REST_VERSION, allow_dev=allow_dev)
 
@@ -346,33 +346,38 @@ class PLCClient:
         )
 
     def random_read(
-        self, words: list[str] | None = None, dwords: list[str] | None = None
-    ) -> dict[str, list[int]]:
+        self,
+        words: list[str] | None = None,
+        dwords: list[str] | None = None,
+        bits: list[str] | None = None,
+    ) -> dict[str, list[int] | list[bool]]:
         """Read values from multiple non-consecutive addresses.
 
-        Returns ``{"words": [...], "dwords": [...]}`` with values in the same
-        order as the input lists. Requires gomc-rest >= ``v0.10.0``.
+        Returns ``{"words": [...], "dwords": [...], "bits": [...]}`` with values
+        in the same order as the input lists. Requires gomc-rest >= ``v1.3.0``.
 
         Args:
             words: Word (16-bit) device addresses, e.g. ``["D100", "D200"]``.
             dwords: Double-word (32-bit) device addresses, e.g. ``["D300"]``.
+            bits: Bit addresses — word-device bit access (e.g. ``["D100.1"]``) or
+                bit devices (e.g. ``["M0"]``, max 16 per request).
 
         Example::
 
-            result = plc.random_read(words=["D100", "D200"], dwords=["D300"])
-            # {"words": [10, 20], "dwords": [65536]}
+            result = plc.random_read(words=["D100", "D200"], dwords=["D300"], bits=["M0"])
+            # {"words": [10, 20], "dwords": [65536], "bits": [True]}
         """
-        if not words and not dwords:
-            raise ValueError("random_read requires at least one word or dword address")
-        response = self._request(
-            "POST",
-            "/random-read",
-            json={"words": list(words or []), "dwords": list(dwords or [])},
-        )
+        if not words and not dwords and not bits:
+            raise ValueError("random_read requires at least one word, dword, or bit address")
+        body: dict[str, Any] = {"words": list(words or []), "dwords": list(dwords or [])}
+        if bits:
+            body["bits"] = list(bits)
+        response = self._request("POST", "/random-read", json=body)
         self._ensure_success(response)
         body = _require_json_object(response)
         random_words = body.get("words")
         random_dwords = body.get("dwords")
+        random_bits = body.get("bits", [])
         if not isinstance(random_words, list) or not all(
             isinstance(value, int) and not isinstance(value, bool) for value in random_words
         ):
@@ -389,7 +394,15 @@ class PLCClient:
                 response.status_code,
                 "bad_response",
             )
-        return {"words": random_words, "dwords": random_dwords}
+        if not isinstance(random_bits, list) or not all(
+            isinstance(value, bool) for value in random_bits
+        ):
+            raise GomcRestError(
+                "response bits must be a list of bools",
+                response.status_code,
+                "bad_response",
+            )
+        return {"words": random_words, "dwords": random_dwords, "bits": random_bits}
 
     def random_write(
         self,
@@ -400,7 +413,7 @@ class PLCClient:
     ) -> None:
         """Write values to multiple non-consecutive addresses using dict items.
 
-        Requires gomc-rest >= ``v0.10.0``.
+        Requires gomc-rest >= ``v1.3.0``.
 
         Args:
             words: Word write items, e.g. ``[{"addr": "D100", "value": 10}]``.
@@ -438,7 +451,7 @@ class PLCClient:
     ) -> None:
         """Write values to multiple non-consecutive addresses using ``(addr, value)`` tuples.
 
-        A concise alternative to :meth:`random_write`. Requires gomc-rest >= ``v0.10.0``.
+        A concise alternative to :meth:`random_write`. Requires gomc-rest >= ``v1.3.0``.
 
         Args:
             words: ``(addr, int)`` tuples for word devices, e.g. ``[("D100", 10)]``.

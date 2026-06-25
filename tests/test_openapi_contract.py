@@ -5,8 +5,8 @@ from typing import Any
 
 import yaml
 
-FIXTURE_PATH = Path(__file__).parent / "fixtures" / "gomc-rest-v0.10.0-openapi.yaml"
-PINNED_OPENAPI_VERSION = "v0.10.0"
+FIXTURE_PATH = Path(__file__).parent / "fixtures" / "gomc-rest-v1.3.0-openapi.yaml"
+PINNED_OPENAPI_VERSION = "v1.3.0"
 
 CLIENT_ROUTE_METHODS = {
     "/version": "get",
@@ -77,6 +77,7 @@ EXPECTED_VERSION_RESPONSE_FIELDS = {
 EXPECTED_METRICS_RESPONSE_FIELDS = {
     "request_count": {"type": "integer"},
     "reconnect_count": {"type": "integer"},
+    "timeout_count": {"type": "integer"},
     "plc_error_count": {"type": "integer"},
     "avg_latency_ms": {"type": "number"},
     "recent_avg_latency_ms": {"type": "number"},
@@ -266,6 +267,7 @@ def test_openapi_contract_keeps_required_fields_for_info_version_and_metrics() -
     assert set(metrics_required) >= {
         "request_count",
         "reconnect_count",
+        "timeout_count",
         "plc_error_count",
         "avg_latency_ms",
         "recent_avg_latency_ms",
@@ -309,8 +311,8 @@ def test_openapi_contract_keeps_client_required_read_and_write_fields() -> None:
     assert "values" in write_body_schema.get("required", [])
     assert random_read_operation["requestBody"]["required"] is True
     assert random_write_operation["requestBody"]["required"] is True
-    assert set(random_read_response_required) >= {"words", "dwords"}
-    assert set(random_read_body_schema.get("properties", {})) >= {"words", "dwords"}
+    assert set(random_read_response_required) >= {"words", "dwords", "bits"}
+    assert set(random_read_body_schema.get("properties", {})) >= {"words", "dwords", "bits"}
     assert set(random_write_body_schema.get("properties", {})) >= {"words", "dwords", "bits"}
 
     for path, expected_parameters in EXPECTED_QUERY_PARAMETERS.items():

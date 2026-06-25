@@ -77,7 +77,7 @@ with PLCClient("http://192.168.0.1:8080") as plc:
     plc.write("D100", [10, 20, 30])
     plc.write("M0", [True, False])
     plc.write("D100", [-1, -32768, 32767], sint=True)
-    random_values = plc.random_read(words=["D100", "D200"], dwords=["D300"])
+    random_values = plc.random_read(words=["D100", "D200"], dwords=["D300"], bits=["D100.1", "M0"])
     plc.random_write_pairs(
         words=[("D100", 10)],
         dwords=[("D300", 65536)],
@@ -121,22 +121,22 @@ plc.random_write(
 )
 ```
 
-`random_read()` takes address-string lists instead, such as `words=["D100", "D200"]`.
+`random_read()` takes address-string lists. `bits` accepts word-device bit access (e.g. `D100.1`) and bit devices (e.g. `M0`, max 16 per request).
 
-The return value from `random_read()` is a dictionary with `words` and `dwords` lists in request order.
+The return value is a dictionary with `words`, `dwords`, and `bits` lists in request order.
 
 ```python
-result = plc.random_read(words=["D100", "D200"], dwords=["D300"])
-# {"words": [100, 200], "dwords": [65536]}
+result = plc.random_read(words=["D100", "D200"], dwords=["D300"], bits=["D100.1", "M0"])
+# {"words": [100, 200], "dwords": [65536], "bits": [True, False]}
 ```
 
 `is_supported_version()` and `is_version_compatible()` treat `dev` builds as compatible by default so local gomc-rest main builds can pass version checks during development.
 
 ## Supported gomc-rest versions
 
-This client supports gomc-rest `v0.10.0` and later.
+This client supports gomc-rest `v1.3.0` and later.
 
-Servers older than `v0.10.0` are not supported because this client relies on the `v0.10.0` `/random-read` and `/random-write` endpoints, along with the newer metrics fields added in that release.
+Servers older than `v1.3.0` are not supported because this client relies on the `v1.3.0` `bits` support in `/random-read` and the `timeout_count` field added to `/metrics` in that release.
 
 This client expects the server to expose `/version`, `/info`, `/metrics`, `/random-read`, and `/random-write`.
 
