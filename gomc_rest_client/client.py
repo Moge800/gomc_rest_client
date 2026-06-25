@@ -359,8 +359,9 @@ class PLCClient:
         Args:
             words: Word (16-bit) device addresses, e.g. ``["D100", "D200"]``.
             dwords: Double-word (32-bit) device addresses, e.g. ``["D300"]``.
-            bits: Bit addresses — word-device bit access (e.g. ``["D100.1"]``) or
-                bit devices (e.g. ``["M0"]``, max 16 per request).
+            bits: Bit addresses (max 255 total). Word-device bit access (e.g.
+                ``["D100.1"]``) is unlimited within that cap. Bit devices (e.g.
+                ``["M0"]``) are capped at 16 per request by the server.
 
         Example::
 

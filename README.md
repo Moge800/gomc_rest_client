@@ -121,7 +121,7 @@ plc.random_write(
 )
 ```
 
-`random_read()` takes address-string lists. `bits` accepts word-device bit access (e.g. `D100.1`) and bit devices (e.g. `M0`, max 16 per request).
+`random_read()` takes address-string lists. `bits` accepts up to 255 addresses total: word-device bit access (e.g. `D100.1`) and bit devices (e.g. `M0`). Bit devices are capped at 16 per request by the server; word-device bit access has no such limit.
 
 The return value is a dictionary with `words`, `dwords`, and `bits` lists in request order.
 
