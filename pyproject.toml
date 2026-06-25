@@ -22,7 +22,7 @@ classifiers = [
 dependencies = []
 
 [project.urls]
-Homepage = "https://github.com/Moge800/gomc-rest"
+Homepage = "https://github.com/Moge800/gomc_rest_client"
 
 [dependency-groups]
 dev = [
