@@ -141,7 +141,7 @@ with PLCClient("http://192.168.0.1:8080", token="s3cret") as plc:
     plc.read("D100", 3)
 ```
 
-A missing or wrong token raises `GomcRestUnauthorizedError` (HTTP 401). The `/health` endpoint is exempt from authentication on the server side. The token is never forwarded across a redirect to a different host.
+A missing or wrong token raises `GomcRestUnauthorizedError` (HTTP 401). The `/health` endpoint is exempt from authentication on the server side. The token is never forwarded across a redirect to a different origin (scheme, host, or port).
 
 ## Supported gomc-rest versions
 

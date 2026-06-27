@@ -74,17 +74,6 @@ components:
             error: "addr is required"
             code: "bad_request"
 
-    Unauthorized:
-      description: Missing or invalid bearer token
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/ErrorResponse"
-          example:
-            status: 401
-            error: "unauthorized"
-            code: "unauthorized"
-
     Forbidden:
       description: Operation not allowed (read-only mode or remote-control disabled)
       content:

@@ -118,14 +118,14 @@ class _UrllibSession:
         extra_headers = dict(kwargs.get("headers") or {})
         current_url = _build_url(url, params)
         current_method = method
-        initial_host = parse.urlsplit(current_url).hostname
+        initial_origin = _origin(parse.urlsplit(current_url))
         current_data: bytes | None = None
         if json_body is not None:
             current_data = json.dumps(json_body).encode("utf-8")
         for _ in range(_MAX_REDIRECTS + 1):
             parsed_url = parse.urlsplit(current_url)
             headers = dict(extra_headers)
-            if parsed_url.hostname != initial_host:
+            if _origin(parsed_url) != initial_origin:
                 headers.pop("Authorization", None)
             if current_data is not None:
                 headers["Content-Type"] = "application/json"
@@ -169,6 +169,22 @@ class _UrllibSession:
         connection = self._connections.pop(key, None)
         if connection is not None:
             connection.close()
+
+
+def _origin(parsed_url: parse.SplitResult) -> tuple[str, str | None, int] | None:
+    """Return ``(scheme, host, effective_port)`` for same-origin comparison.
+
+    Returns ``None`` when the port cannot be parsed so callers treat it as a
+    different origin and drop credentials (fail safe).
+    """
+    scheme = parsed_url.scheme or "http"
+    try:
+        port = parsed_url.port
+    except ValueError:
+        return None
+    if port is None:
+        port = 443 if scheme == "https" else 80
+    return (scheme, parsed_url.hostname, port)
 
 
 def _connection_key(
@@ -218,7 +234,8 @@ class PLCClient:
             request. Required when the server is started with ``-token`` or the
             ``GOMCR_TOKEN`` environment variable. A missing or wrong token raises
             :class:`~gomc_rest_client.GomcRestUnauthorizedError`. The token is
-            never sent across redirects to a different host.
+            never sent across redirects to a different origin (scheme, host, or
+            port).
     """
 
     def __init__(

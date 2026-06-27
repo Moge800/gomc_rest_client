@@ -965,3 +965,71 @@ def test_urllib_session_drops_authorization_on_cross_host_redirect(
 
     assert redirect_connection.requests[0]["headers"] == {"Authorization": "Bearer s3cret"}
     assert destination_connection.requests[0]["headers"] == {}
+
+
+@pytest.mark.parametrize(
+    ("start_url", "location"),
+    [
+        ("https://localhost:8443/health", "http://localhost:8443/health"),  # scheme downgrade
+        ("http://localhost:8080/health", "http://localhost:9090/health"),  # port change
+    ],
+)
+def test_urllib_session_drops_authorization_on_origin_change(
+    monkeypatch: pytest.MonkeyPatch, start_url: str, location: str
+) -> None:
+    redirect_connection = FakeHTTPConnection(
+        [FakeHTTPResponse(301, b"", headers={"Location": location})]
+    )
+    destination_connection = FakeHTTPConnection([FakeHTTPResponse(200, b'{"plc_status":"ok"}')])
+    first = True
+
+    def fake_create_http_connection(
+        scheme: str, host: str, port: int | None, timeout: float | None
+    ) -> FakeHTTPConnection:
+        nonlocal first
+        if first:
+            first = False
+            return redirect_connection
+        return destination_connection
+
+    monkeypatch.setattr(
+        "gomc_rest_client.client._create_http_connection", fake_create_http_connection
+    )
+
+    _UrllibSession().get(
+        start_url,
+        headers={"Authorization": "Bearer s3cret"},
+        timeout=3.5,
+    )
+
+    assert redirect_connection.requests[0]["headers"] == {"Authorization": "Bearer s3cret"}
+    assert destination_connection.requests[0]["headers"] == {}
+
+
+def test_urllib_session_keeps_authorization_on_same_origin_redirect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A same-origin redirect reuses the cached connection, so queue both responses on it.
+    connection = FakeHTTPConnection(
+        [
+            FakeHTTPResponse(301, b"", headers={"Location": "http://localhost:8080/health/"}),
+            FakeHTTPResponse(200, b'{"plc_status":"ok"}'),
+        ]
+    )
+
+    def fake_create_http_connection(
+        scheme: str, host: str, port: int | None, timeout: float | None
+    ) -> FakeHTTPConnection:
+        return connection
+
+    monkeypatch.setattr(
+        "gomc_rest_client.client._create_http_connection", fake_create_http_connection
+    )
+
+    _UrllibSession().get(
+        "http://localhost:8080/health",
+        headers={"Authorization": "Bearer s3cret"},
+        timeout=3.5,
+    )
+
+    assert connection.requests[1]["headers"] == {"Authorization": "Bearer s3cret"}

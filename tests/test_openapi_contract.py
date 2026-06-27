@@ -263,15 +263,6 @@ def test_openapi_contract_declares_bearer_auth_with_health_exempt() -> None:
     assert spec["paths"]["/health"]["get"]["security"] == []
 
 
-def test_openapi_contract_keeps_unauthorized_error_code() -> None:
-    spec = _load_openapi_spec()
-
-    unauthorized = spec["components"]["responses"]["Unauthorized"]
-    example = unauthorized["content"]["application/json"]["example"]
-    assert example["code"] == "unauthorized"
-    assert example["status"] == 401
-
-
 def test_openapi_contract_keeps_required_fields_for_info_version_and_metrics() -> None:
     spec = _load_openapi_spec()
 

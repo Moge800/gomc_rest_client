@@ -141,7 +141,7 @@ with PLCClient("http://192.168.0.1:8080", token="s3cret") as plc:
     plc.read("D100", 3)
 ```
 
-トークンが未指定または誤っている場合は `GomcRestUnauthorizedError`（HTTP 401）が送出されます。`/health` エンドポイントはサーバー側で認証免除です。トークンは別ホストへのリダイレクト時には転送されません。
+トークンが未指定または誤っている場合は `GomcRestUnauthorizedError`（HTTP 401）が送出されます。`/health` エンドポイントはサーバー側で認証免除です。トークンは別オリジン（scheme・host・port のいずれかが異なる先）へのリダイレクト時には転送されません。
 
 ## 対応する gomc-rest バージョン
 
