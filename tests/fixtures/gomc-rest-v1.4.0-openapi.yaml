@@ -3,11 +3,13 @@ openapi: "3.1.0"
 info:
   title: gomc-rest
   description: REST API gateway for Mitsubishi PLC (MC Protocol 3E/4E)
-  version: v1.4.0
+  version: dev
 
 servers:
   - url: http://localhost:8080
 
+# Applies only when the server is started with GOMCR_TOKEN set. When it is
+# unset there is no authentication. /health overrides this with `security: []`.
 security:
   - bearerAuth: []
 
@@ -18,9 +20,9 @@ components:
       scheme: bearer
       description: >
         Static shared token supplied via the -token flag or the GOMCR_TOKEN
-        environment variable. Sent as `Authorization: Bearer <token>`. The token
-        travels in cleartext over HTTP; terminate TLS with a reverse proxy if
-        encryption is needed.
+        environment variable. Sent as `Authorization: Bearer <token>`.
+        The token travels in cleartext
+        over HTTP; terminate TLS with a reverse proxy if encryption is needed.
   schemas:
     ErrorResponse:
       type: object
@@ -207,17 +209,6 @@ paths:
             application/json:
               schema:
                 type: object
-                required:
-                  - version
-                  - gomcprotocol_version
-                  - host
-                  - port
-                  - frame
-                  - transport
-                  - mode
-                  - listen_addrs
-                  - readonly
-                  - enable_remote
                 properties:
                   version:
                     type: string
@@ -319,12 +310,12 @@ paths:
                   client_avg_latency_ms:
                     type: number
                     format: double
-                    description: Average client-visible latency since process start, excluding busy rejections, in milliseconds
+                    description: Average client-visible latency (queue wait + PLC) since process start, excluding busy rejections, in milliseconds (2 decimal places)
                     example: 32.5
                   client_recent_avg_latency_ms:
                     type: number
                     format: double
-                    description: Average client-visible latency for the most recent 100 non-busy requests, in milliseconds
+                    description: Average client-visible latency for the most recent 100 non-busy requests, in milliseconds (2 decimal places)
                     example: 28.1
                   queue_length:
                     type: integer
@@ -336,11 +327,11 @@ paths:
                     example: 1234
                   reconnect_count:
                     type: integer
-                    description: Total reconnect attempts
+                    description: Total reconnect attempts (excludes initial connect at startup)
                     example: 2
                   timeout_count:
                     type: integer
-                    description: Requests that timed out before, during, or after queuing
+                    description: Requests that returned context.DeadlineExceeded (timed out before, during, or after queuing)
                     example: 3
                   plc_error_count:
                     type: integer
@@ -349,12 +340,12 @@ paths:
                   avg_latency_ms:
                     type: number
                     format: double
-                    description: Average PLC wire latency since process start, in milliseconds
+                    description: Average PLC wire latency since process start, in milliseconds (2 decimal places)
                     example: 8.33
                   recent_avg_latency_ms:
                     type: number
                     format: double
-                    description: Average PLC wire latency for the most recent 100 requests, in milliseconds
+                    description: Average PLC wire latency for the most recent 100 requests, in milliseconds (2 decimal places)
                     example: 7.12
         "405":
           $ref: "#/components/responses/MethodNotAllowed"
@@ -370,19 +361,20 @@ paths:
         With `sint=true` interprets values as signed (16-bit or 32-bit).
 
         **Bit devices** (M, X, Y, B, TC, CC, …): returns `list[bool]`. `dword` and `sint` are not supported.
+        Timer/counter contacts and coils use two-letter prefixes: `TC`, `TS`, `CC`, `CS`. Single-letter `T` and `C` are not valid.
       operationId: readDevice
       parameters:
         - name: addr
           in: query
           required: true
-          description: "PLC device address, e.g. `D100`, `M0`, `X1F`."
+          description: "PLC device address, e.g. `D100`, `M0`, `X1F`. Hex-addressed devices (X, Y, B, SB, W, SW, ZR, DX, DY) use hex numbers (e.g. `X4F`, `W1D`). Word devices support bit access with `.N` suffix (single hex digit 0–F), e.g. `D100.0`; with `count` it reads consecutive bits starting at `N` and returns `{\"values\":[true,false,...]}`. Bits must stay within one word (`N + count` ≤ 16)."
           schema:
             type: string
             example: "D100"
         - name: count
           in: query
           required: false
-          description: "Number of values to read (default 1, max 1024)"
+          description: "Number of values to read (default 1, max 1024; max 512 when dword=true). For bit access, reads consecutive bits starting at `N`; `N + count` must not exceed 16."
           schema:
             type: integer
             default: 1
@@ -392,7 +384,7 @@ paths:
         - name: dword
           in: query
           required: false
-          description: "Read 32-bit double words (word devices only)"
+          description: "Read 32-bit double words (word devices only; reads count×2 registers; unsigned by default, signed with `sint=true`)"
           schema:
             type: boolean
             default: false
@@ -418,9 +410,24 @@ paths:
                         items:
                           type: integer
                           format: int64
+                        description: Word device values
                       - type: array
                         items:
                           type: boolean
+                        description: Bit device values
+              examples:
+                word_read:
+                  summary: Word device (D100, count=3)
+                  value:
+                    values: [10, 20, 30]
+                bit_read:
+                  summary: Bit device (M0, count=4)
+                  value:
+                    values: [true, false, true, false]
+                dword_read:
+                  summary: DWord device (D100, count=2, dword=true)
+                  value:
+                    values: [100000, 200000]
         "400":
           $ref: "#/components/responses/BadRequest"
         "405":
@@ -439,20 +446,30 @@ paths:
       summary: Write PLC device values
       description: |
         Write one or more values to a PLC device address.
+
+        **Word devices**: body `values` must be `list[int]` (0–65535).
+        With `dword=true`: `values` is `list[int]` (0–4294967295, or −2147483648..2147483647 with `sint=true`).
+        With `sint=true`: `values` is `list[int]` (−32768–32767).
+
+        **Bit devices**: body `values` must be `list[bool]`.
+        Timer/counter contacts and coils use two-letter prefixes: `TC`, `TS`, `CC`, `CS`. Single-letter `T` and `C` are not valid.
+
+        Maximum items in `values`: 1024 for word/bit writes, 512 when `dword=true` (each value occupies two registers).
+
         Requires server not started with `-readonly`.
       operationId: writeDevice
       parameters:
         - name: addr
           in: query
           required: true
-          description: "PLC device address, e.g. `D100`, `M0`."
+          description: "PLC device address, e.g. `D100`, `M0`. Hex-addressed devices (X, Y, B, SB, W, SW, ZR, DX, DY) use hex numbers (e.g. `X4F`, `W1D`). Word devices support bit access with `.N` suffix (single hex digit 0–F), e.g. `D100.0`; body is an array of booleans applied to consecutive bits starting at `N`, e.g. `{\"values\":[true,false,true]}`. Bits must stay within one word (`N + len(values)` ≤ 16)."
           schema:
             type: string
             example: "D100"
         - name: dword
           in: query
           required: false
-          description: "Write 32-bit double words (word devices only)"
+          description: "Write 32-bit double words (word devices only; unsigned by default, signed with `sint=true`)"
           schema:
             type: boolean
             default: false
@@ -477,11 +494,26 @@ paths:
                       items:
                         type: integer
                         format: int64
+                      description: Word or dword values
                     - type: array
                       items:
                         type: boolean
+                      description: Bit values
                   minItems: 1
                   maxItems: 1024
+            examples:
+              word_write:
+                summary: Write to word device
+                value:
+                  values: [10, 20, 30]
+              bit_write:
+                summary: Write to bit device
+                value:
+                  values: [true, false]
+              dword_write:
+                summary: Write dword values
+                value:
+                  values: [100000, 200000]
       responses:
         "200":
           description: OK
@@ -510,10 +542,9 @@ paths:
     post:
       summary: Random read PLC device values
       description: |
-        Read multiple non-contiguous device addresses.
-        `words` and `dwords` use MC Protocol random read (0x0403).
-        `bits` accepts word-device bit access (e.g. `D100.1`) and bit devices (e.g. `M0`, max 16).
-        At least one of `words`, `dwords`, or `bits` must be non-empty.
+        Read multiple non-contiguous device addresses. `words` and `dwords` use a single MC Protocol random read (command 0x0403) returning 16-bit and 32-bit unsigned values; only word devices (D, W, R, ZR, TN, STN, CN, Z, SW, SD) are supported there.
+        `bits` accepts word-device bit access (e.g. `D100.1`) and bit devices (e.g. `M0`). Word-device bits are read by folding the containing word into the random read and masking the bit. Bit devices have no MC random-read unit, so each is read with a separate ReadBits (0x0401) and is capped at 16 per request; use word-device bit access for more. All reads run within one serialized job.
+        Maximum 255 addresses per category. At least one of `words`, `dwords`, or `bits` must be non-empty.
       operationId: randomRead
       requestBody:
         required: true
@@ -526,19 +557,19 @@ paths:
                   type: array
                   items:
                     type: string
-                  description: "Word device addresses to read as 16-bit values"
+                  description: "Word device addresses to read as 16-bit values (e.g. [\"D100\", \"D200\"])"
                   maxItems: 255
                 dwords:
                   type: array
                   items:
                     type: string
-                  description: "Word device addresses to read as 32-bit values"
+                  description: "Word device addresses to read as 32-bit values (e.g. [\"D300\"])"
                   maxItems: 255
                 bits:
                   type: array
                   items:
                     type: string
-                  description: "Word-device bit access (e.g. \"D100.1\") or bit devices (e.g. \"M0\", max 16)"
+                  description: "Word-device bit access (e.g. [\"D100.1\"]) or bit devices (e.g. [\"M0\"], max 16)"
                   maxItems: 255
             example:
               words: ["D100", "D200"]
@@ -592,9 +623,11 @@ paths:
     post:
       summary: Random write PLC device values
       description: |
-        Write multiple non-contiguous device addresses.
-        `bits` accepts bit devices (e.g. `M0`) and word-device bit access (e.g. `D100.1`).
-        At least one array must be non-empty.
+        Write multiple non-contiguous device addresses in one or two MC Protocol requests.
+        `words` and `dwords` use command 0x1402 (word/dword random write); bit devices in `bits` use command 0x1402 subcommand 0x0001 (bit random write).
+        Both commands are issued within a single serialized job.
+        `words` and `dwords` require word devices. `bits` accepts bit devices (e.g. `M0`) and word-device bit access (e.g. `D100.1`); word-device bits are applied via read-modify-write, with bits in the same word merged into a single read/write.
+        Maximum 255 entries per array. At least one array must be non-empty.
         Requires server not started with `-readonly`.
       operationId: randomWrite
       requestBody:
@@ -612,6 +645,7 @@ paths:
                     properties:
                       addr:
                         type: string
+                        description: Word device address
                       value:
                         type: integer
                         minimum: 0
@@ -625,6 +659,7 @@ paths:
                     properties:
                       addr:
                         type: string
+                        description: Word device address
                       value:
                         type: integer
                         format: int64
@@ -639,7 +674,7 @@ paths:
                     properties:
                       addr:
                         type: string
-                        description: Bit device (e.g. `M0`) or word-device bit access (e.g. `D100.1`)
+                        description: Bit device address (e.g. `M0`) or word-device bit access (e.g. `D100.1`)
                       value:
                         type: boolean
                   maxItems: 255
@@ -647,6 +682,9 @@ paths:
               words:
                 - addr: "D100"
                   value: 1234
+              dwords:
+                - addr: "D300"
+                  value: 65536
               bits:
                 - addr: "M0"
                   value: true
@@ -842,3 +880,18 @@ paths:
           $ref: "#/components/responses/ServiceUnavailable"
         "504":
           $ref: "#/components/responses/RequestTimeout"
+
+  /openapi.yaml:
+    get:
+      summary: OpenAPI specification
+      description: Returns this OpenAPI specification as YAML.
+      operationId: getOpenAPI
+      responses:
+        "200":
+          description: OK
+          content:
+            application/yaml:
+              schema:
+                type: string
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
