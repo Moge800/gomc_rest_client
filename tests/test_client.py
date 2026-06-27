@@ -254,16 +254,23 @@ def test_read_and_write_accept_v090_word_bit_access() -> None:
 def test_random_read_and_write_requests() -> None:
     session = FakeSession(
         [
-            FakeResponse(payload={"words": [100, 200], "dwords": [65536]}),
+            FakeResponse(payload={"words": [100, 200], "dwords": [65536], "bits": [True, False]}),
+            FakeResponse(payload={"words": [300], "dwords": [], "bits": []}),
             FakeResponse(payload={"ok": True}),
             FakeResponse(payload={"ok": True}),
         ]
     )
     client = PLCClient(session=session)
 
-    assert client.random_read(words=["D100", "D200"], dwords=["D300"]) == {
+    assert client.random_read(words=["D100", "D200"], dwords=["D300"], bits=["D100.1", "M0"]) == {
         "words": [100, 200],
         "dwords": [65536],
+        "bits": [True, False],
+    }
+    assert client.random_read(words=["D200"]) == {
+        "words": [300],
+        "dwords": [],
+        "bits": [],
     }
     client.random_write(
         words=[{"addr": "D100", "value": 10}],
@@ -277,15 +284,21 @@ def test_random_read_and_write_requests() -> None:
     )
 
     assert session.calls[0]["url"] == "http://localhost:8080/random-read"
-    assert session.calls[0]["json"] == {"words": ["D100", "D200"], "dwords": ["D300"]}
-    assert session.calls[1]["url"] == "http://localhost:8080/random-write"
-    assert session.calls[1]["json"] == {
+    assert session.calls[0]["json"] == {
+        "words": ["D100", "D200"],
+        "dwords": ["D300"],
+        "bits": ["D100.1", "M0"],
+    }
+    assert session.calls[1]["url"] == "http://localhost:8080/random-read"
+    assert session.calls[1]["json"] == {"words": ["D200"], "dwords": []}
+    assert session.calls[2]["url"] == "http://localhost:8080/random-write"
+    assert session.calls[2]["json"] == {
         "words": [{"addr": "D100", "value": 10}],
         "dwords": [{"addr": "D300", "value": 65536}],
         "bits": [{"addr": "M0", "value": True}],
     }
-    assert session.calls[2]["url"] == "http://localhost:8080/random-write"
-    assert session.calls[2]["json"] == {
+    assert session.calls[3]["url"] == "http://localhost:8080/random-write"
+    assert session.calls[3]["json"] == {
         "words": [{"addr": "D110", "value": 11}, {"addr": "D120", "value": 12}],
         "dwords": [{"addr": "D310", "value": 65537}],
         "bits": [{"addr": "M1", "value": False}],
@@ -295,7 +308,9 @@ def test_random_read_and_write_requests() -> None:
 def test_random_read_requires_at_least_one_address() -> None:
     client = PLCClient(session=FakeSession([]))
 
-    with pytest.raises(ValueError, match="random_read requires at least one word or dword address"):
+    with pytest.raises(
+        ValueError, match="random_read requires at least one word, dword, or bit address"
+    ):
         client.random_read()
 
 
@@ -326,6 +341,9 @@ def test_random_write_pairs_requires_at_least_one_item() -> None:
         ({"words": [True], "dwords": []}, "response words must be a list of ints"),
         ({"words": [1], "dwords": "bad"}, "response dwords must be a list of ints"),
         ({"words": [1], "dwords": [False]}, "response dwords must be a list of ints"),
+        ({"words": [1], "dwords": []}, "response bits must be a list of bools"),
+        ({"words": [1], "dwords": [], "bits": "bad"}, "response bits must be a list of bools"),
+        ({"words": [1], "dwords": [], "bits": [1]}, "response bits must be a list of bools"),
     ],
 )
 def test_random_read_rejects_malformed_success_payload(
@@ -395,9 +413,10 @@ def test_is_version_compatible_rejects_invalid_minimum_version() -> None:
 @pytest.mark.parametrize(
     ("server_version", "allow_dev", "expected"),
     [
-        ("v0.10.0", True, True),
-        ("v0.10.1", True, True),
-        ("v0.9.9", True, False),
+        ("v1.3.0", True, True),
+        ("v1.3.1", True, True),
+        ("v1.2.9", True, False),
+        ("v0.10.0", True, False),
         ("dev", True, True),
         ("dev", False, False),
     ],
@@ -406,17 +425,17 @@ def test_is_supported_version(server_version: str, allow_dev: bool, expected: bo
     session = FakeSession([FakeResponse(payload={"version": server_version})])
     client = PLCClient(session=session)
 
-    assert MINIMUM_SUPPORTED_GOMC_REST_VERSION == "v0.10.0"
+    assert MINIMUM_SUPPORTED_GOMC_REST_VERSION == "v1.3.0"
     assert client.is_supported_version(allow_dev=allow_dev) is expected
 
 
 def test_version_helpers_reuse_cached_version() -> None:
-    session = FakeSession([FakeResponse(payload={"version": "v0.10.0"})])
+    session = FakeSession([FakeResponse(payload={"version": "v1.3.0"})])
     client = PLCClient(session=session)
 
-    assert client.version() == "v0.10.0"
+    assert client.version() == "v1.3.0"
     assert client.is_supported_version() is True
-    assert client.is_version_compatible("v0.10.0") is True
+    assert client.is_version_compatible("v1.3.0") is True
     assert len(session.calls) == 1
     assert session.calls[0]["url"] == "http://localhost:8080/version"
 

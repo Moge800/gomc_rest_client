@@ -77,7 +77,7 @@ with PLCClient("http://192.168.0.1:8080") as plc:
     plc.write("D100", [10, 20, 30])
     plc.write("M0", [True, False])
     plc.write("D100", [-1, -32768, 32767], sint=True)
-    random_values = plc.random_read(words=["D100", "D200"], dwords=["D300"])
+    random_values = plc.random_read(words=["D100", "D200"], dwords=["D300"], bits=["D100.1", "M0"])
     plc.random_write_pairs(
         words=[("D100", 10)],
         dwords=[("D300", 65536)],
@@ -121,22 +121,22 @@ plc.random_write(
 )
 ```
 
-`random_read()` は辞書ではなく、`words=["D100", "D200"]` のようなアドレス文字列のリストを渡します。
+`random_read()` はアドレス文字列のリストを渡します。`bits` には最大255件のアドレスを指定できます。ワードデバイスのビットアクセス（例: `D100.1`）はその範囲内で制限なし、ビットデバイス（例: `M0`）はサーバー側の制限により1リクエスト最大16件です。
 
-`random_read()` の戻り値は、リクエスト順の `words` と `dwords` を持つ辞書です。
+戻り値はリクエスト順の `words`、`dwords`、`bits` を持つ辞書です。
 
 ```python
-result = plc.random_read(words=["D100", "D200"], dwords=["D300"])
-# {"words": [100, 200], "dwords": [65536]}
+result = plc.random_read(words=["D100", "D200"], dwords=["D300"], bits=["D100.1", "M0"])
+# {"words": [100, 200], "dwords": [65536], "bits": [True, False]}
 ```
 
 `is_supported_version()` と `is_version_compatible()` は、開発中の gomc-rest main ビルドを扱いやすくするため、デフォルトで `dev` ビルドを互換ありとして扱います。
 
 ## 対応する gomc-rest バージョン
 
-このクライアントは gomc-rest `v0.10.0` 以降を対象としています。
+このクライアントは gomc-rest `v1.3.0` 以降を対象としています。
 
-`v0.10.0` より古いサーバーはサポート対象外です。このクライアントは `v0.10.0` で追加された `/random-read`、`/random-write`、および拡張された metrics フィールドに依存しています。
+`v1.3.0` より古いサーバーはサポート対象外です。このクライアントは `v1.3.0` で追加された `/random-read` の `bits` サポートおよび `timeout_count` メトリクスフィールドに依存しています。
 
 このクライアントはサーバーが `/version`、`/info`、`/metrics`、`/random-read`、`/random-write` を提供している前提です。
 
