@@ -132,11 +132,22 @@ result = plc.random_read(words=["D100", "D200"], dwords=["D300"], bits=["D100.1"
 
 `is_supported_version()` と `is_version_compatible()` は、開発中の gomc-rest main ビルドを扱いやすくするため、デフォルトで `dev` ビルドを互換ありとして扱います。
 
+## 認証
+
+サーバーが `-token` フラグまたは `GOMCR_TOKEN` 環境変数付きで起動されている場合は、対応するトークンを渡します。トークンは全リクエストに `Authorization: Bearer <token>` として送信されます。
+
+```python
+with PLCClient("http://192.168.0.1:8080", token="s3cret") as plc:
+    plc.read("D100", 3)
+```
+
+トークンが未指定または誤っている場合は `GomcRestUnauthorizedError`（HTTP 401）が送出されます。`/health` エンドポイントはサーバー側で認証免除です。トークンは別ホストへのリダイレクト時には転送されません。
+
 ## 対応する gomc-rest バージョン
 
-このクライアントは gomc-rest `v1.3.0` 以降を対象としています。
+このクライアントは gomc-rest `v1.4.0` 以降を対象としています。
 
-`v1.3.0` より古いサーバーはサポート対象外です。このクライアントは `v1.3.0` で追加された `/random-read` の `bits` サポートおよび `timeout_count` メトリクスフィールドに依存しています。
+`v1.4.0` より古いサーバーはサポート対象外です。このクライアントは `v1.3.0` で追加された `/random-read` の `bits` サポートと `timeout_count` メトリクスフィールド、および `v1.4.0` で追加された Bearer トークン認証に依存しています。
 
 このクライアントはサーバーが `/version`、`/info`、`/metrics`、`/random-read`、`/random-write` を提供している前提です。
 

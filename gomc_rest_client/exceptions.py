@@ -18,6 +18,14 @@ class GomcRestBadRequestError(GomcRestError):
     """Raised on HTTP 400 — invalid address, out-of-range count, etc."""
 
 
+class GomcRestUnauthorizedError(GomcRestError):
+    """Raised on HTTP 401 — missing or invalid bearer token.
+
+    Set the token via ``PLCClient(token=...)`` when the server is started with
+    ``-token`` or the ``GOMCR_TOKEN`` environment variable.
+    """
+
+
 class GomcRestForbiddenError(GomcRestError):
     """Raised on HTTP 403 — operation not allowed (read-only mode or remote-control disabled)."""
 

@@ -132,11 +132,22 @@ result = plc.random_read(words=["D100", "D200"], dwords=["D300"], bits=["D100.1"
 
 `is_supported_version()` and `is_version_compatible()` treat `dev` builds as compatible by default so local gomc-rest main builds can pass version checks during development.
 
+## Authentication
+
+When the server is started with `-token` or the `GOMCR_TOKEN` environment variable, pass the matching token. It is sent as `Authorization: Bearer <token>` on every request:
+
+```python
+with PLCClient("http://192.168.0.1:8080", token="s3cret") as plc:
+    plc.read("D100", 3)
+```
+
+A missing or wrong token raises `GomcRestUnauthorizedError` (HTTP 401). The `/health` endpoint is exempt from authentication on the server side. The token is never forwarded across a redirect to a different host.
+
 ## Supported gomc-rest versions
 
-This client supports gomc-rest `v1.3.0` and later.
+This client supports gomc-rest `v1.4.0` and later.
 
-Servers older than `v1.3.0` are not supported because this client relies on the `v1.3.0` `bits` support in `/random-read` and the `timeout_count` field added to `/metrics` in that release.
+Servers older than `v1.4.0` are not supported because this client relies on the `v1.3.0` `bits` support in `/random-read`, the `timeout_count` field added to `/metrics`, and the bearer-token authentication added in `v1.4.0`.
 
 This client expects the server to expose `/version`, `/info`, `/metrics`, `/random-read`, and `/random-write`.
 

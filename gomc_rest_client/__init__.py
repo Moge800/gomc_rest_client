@@ -15,6 +15,7 @@ from .exceptions import (
     GomcRestQueueClosedError,
     GomcRestRequestCanceledError,
     GomcRestRequestTimeoutError,
+    GomcRestUnauthorizedError,
 )
 
 __all__ = [
@@ -27,6 +28,7 @@ __all__ = [
     "GomcRestQueueClosedError",
     "GomcRestRequestCanceledError",
     "GomcRestRequestTimeoutError",
+    "GomcRestUnauthorizedError",
     "MINIMUM_SUPPORTED_GOMC_REST_VERSION",
     "PLCClient",
     "RandomBitWriteItem",

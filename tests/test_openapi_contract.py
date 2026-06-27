@@ -5,8 +5,8 @@ from typing import Any
 
 import yaml
 
-FIXTURE_PATH = Path(__file__).parent / "fixtures" / "gomc-rest-v1.3.0-openapi.yaml"
-PINNED_OPENAPI_VERSION = "v1.3.0"
+FIXTURE_PATH = Path(__file__).parent / "fixtures" / "gomc-rest-v1.4.0-openapi.yaml"
+PINNED_OPENAPI_VERSION = "v1.4.0"
 
 CLIENT_ROUTE_METHODS = {
     "/version": "get",
@@ -250,6 +250,26 @@ def test_openapi_contract_uses_pinned_release_version() -> None:
     spec = _load_openapi_spec()
 
     assert spec["info"]["version"] == PINNED_OPENAPI_VERSION
+
+
+def test_openapi_contract_declares_bearer_auth_with_health_exempt() -> None:
+    spec = _load_openapi_spec()
+
+    bearer = spec["components"]["securitySchemes"]["bearerAuth"]
+    assert bearer["type"] == "http"
+    assert bearer["scheme"] == "bearer"
+    assert {"bearerAuth": []} in spec["security"]
+    # /health must stay reachable without a token for liveness monitoring.
+    assert spec["paths"]["/health"]["get"]["security"] == []
+
+
+def test_openapi_contract_keeps_unauthorized_error_code() -> None:
+    spec = _load_openapi_spec()
+
+    unauthorized = spec["components"]["responses"]["Unauthorized"]
+    example = unauthorized["content"]["application/json"]["example"]
+    assert example["code"] == "unauthorized"
+    assert example["status"] == 401
 
 
 def test_openapi_contract_keeps_required_fields_for_info_version_and_metrics() -> None:
