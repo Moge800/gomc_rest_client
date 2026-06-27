@@ -1006,6 +1006,40 @@ def test_urllib_session_drops_authorization_on_origin_change(
     assert destination_connection.requests[0]["headers"] == {}
 
 
+def test_urllib_session_does_not_restore_authorization_when_chain_returns_to_origin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A -> B (different origin) -> A: the token must stay dropped on the 3rd hop.
+    connection_a = FakeHTTPConnection(
+        [
+            FakeHTTPResponse(307, b"", headers={"Location": "http://other:8080/health"}),
+            FakeHTTPResponse(200, b'{"plc_status":"ok"}'),
+        ]
+    )
+    connection_b = FakeHTTPConnection(
+        [FakeHTTPResponse(307, b"", headers={"Location": "http://localhost:8080/health"})]
+    )
+
+    def fake_create_http_connection(
+        scheme: str, host: str, port: int | None, timeout: float | None
+    ) -> FakeHTTPConnection:
+        return connection_a if host == "localhost" else connection_b
+
+    monkeypatch.setattr(
+        "gomc_rest_client.client._create_http_connection", fake_create_http_connection
+    )
+
+    _UrllibSession().get(
+        "http://localhost:8080/health",
+        headers={"Authorization": "Bearer s3cret"},
+        timeout=3.5,
+    )
+
+    assert connection_a.requests[0]["headers"] == {"Authorization": "Bearer s3cret"}
+    assert connection_b.requests[0]["headers"] == {}
+    assert connection_a.requests[1]["headers"] == {}
+
+
 def test_urllib_session_keeps_authorization_on_same_origin_redirect(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

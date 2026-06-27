@@ -124,9 +124,11 @@ class _UrllibSession:
             current_data = json.dumps(json_body).encode("utf-8")
         for _ in range(_MAX_REDIRECTS + 1):
             parsed_url = parse.urlsplit(current_url)
-            headers = dict(extra_headers)
             if _origin(parsed_url) != initial_origin:
-                headers.pop("Authorization", None)
+                # Once the chain leaves the original origin, never restore the
+                # token — even if a later hop returns to the original origin.
+                extra_headers.pop("Authorization", None)
+            headers = dict(extra_headers)
             if current_data is not None:
                 headers["Content-Type"] = "application/json"
             connection = self._get_connection(parsed_url, timeout)
