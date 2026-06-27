@@ -16,10 +16,12 @@ from .exceptions import (
     GomcRestQueueClosedError,
     GomcRestRequestCanceledError,
     GomcRestRequestTimeoutError,
+    GomcRestUnauthorizedError,
 )
 
 _CODE_TO_EXC = {
     "bad_request": GomcRestBadRequestError,
+    "unauthorized": GomcRestUnauthorizedError,
     "forbidden": GomcRestForbiddenError,
     "connection_error": GomcRestConnectionError,
     "busy": GomcRestBusyError,
@@ -27,8 +29,11 @@ _CODE_TO_EXC = {
     "request_canceled": GomcRestRequestCanceledError,
     "request_timeout": GomcRestRequestTimeoutError,
 }
+_STATUS_TO_EXC = {
+    401: GomcRestUnauthorizedError,
+}
 
-MINIMUM_SUPPORTED_GOMC_REST_VERSION = "v1.3.0"
+MINIMUM_SUPPORTED_GOMC_REST_VERSION = "v1.4.0"
 _REDIRECT_STATUSES = {301, 302, 303, 307, 308}
 _MAX_REDIRECTS = 5
 
@@ -110,15 +115,22 @@ class _UrllibSession:
         params = kwargs.get("params")
         timeout = kwargs.get("timeout")
         json_body = kwargs.get("json")
+        extra_headers = dict(kwargs.get("headers") or {})
         current_url = _build_url(url, params)
         current_method = method
-        headers: dict[str, str] = {}
+        initial_origin = _origin(parse.urlsplit(current_url))
         current_data: bytes | None = None
         if json_body is not None:
             current_data = json.dumps(json_body).encode("utf-8")
-            headers["Content-Type"] = "application/json"
         for _ in range(_MAX_REDIRECTS + 1):
             parsed_url = parse.urlsplit(current_url)
+            if _origin(parsed_url) != initial_origin:
+                # Once the chain leaves the original origin, never restore the
+                # token — even if a later hop returns to the original origin.
+                extra_headers.pop("Authorization", None)
+            headers = dict(extra_headers)
+            if current_data is not None:
+                headers["Content-Type"] = "application/json"
             connection = self._get_connection(parsed_url, timeout)
             path = _request_target(parsed_url)
             try:
@@ -133,7 +145,6 @@ class _UrllibSession:
                     if response.status in {301, 302, 303} and current_method != "GET":
                         current_method = "GET"
                         current_data = None
-                        headers = {}
                     continue
                 return _UrllibResponse(response.status, body)
             except Exception:
@@ -160,6 +171,22 @@ class _UrllibSession:
         connection = self._connections.pop(key, None)
         if connection is not None:
             connection.close()
+
+
+def _origin(parsed_url: parse.SplitResult) -> tuple[str, str | None, int] | None:
+    """Return ``(scheme, host, effective_port)`` for same-origin comparison.
+
+    Returns ``None`` when the port cannot be parsed so callers treat it as a
+    different origin and drop credentials (fail safe).
+    """
+    scheme = parsed_url.scheme or "http"
+    try:
+        port = parsed_url.port
+    except ValueError:
+        return None
+    if port is None:
+        port = 443 if scheme == "https" else 80
+    return (scheme, parsed_url.hostname, port)
 
 
 def _connection_key(
@@ -205,6 +232,12 @@ class PLCClient:
         timeout: Socket timeout in seconds. Defaults to ``10.0``.
         session: Custom session implementing :class:`SessionLike`. A built-in
             urllib session is created and owned (closed on exit) when omitted.
+        token: Bearer token sent as ``Authorization: Bearer <token>`` on every
+            request. Required when the server is started with ``-token`` or the
+            ``GOMCR_TOKEN`` environment variable. A missing or wrong token raises
+            :class:`~gomc_rest_client.GomcRestUnauthorizedError`. The token is
+            never sent across redirects to a different origin (scheme, host, or
+            port).
     """
 
     def __init__(
@@ -212,12 +245,14 @@ class PLCClient:
         base_url: str = "http://localhost:8080",
         timeout: float = 10.0,
         session: SessionLike | None = None,
+        token: str | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self._owned_session = session is None
         self.session = _create_default_session() if session is None else session
         self._cached_version: str | None = None
+        self._auth_headers = {"Authorization": f"Bearer {token}"} if token else {}
 
     def __enter__(self) -> PLCClient:
         return self
@@ -525,6 +560,8 @@ class PLCClient:
 
     def _request(self, method: str, path: str, **kwargs: Any) -> ResponseLike:
         request_method = self.session.get if method == "GET" else self.session.post
+        if self._auth_headers:
+            kwargs["headers"] = {**self._auth_headers, **(kwargs.get("headers") or {})}
         try:
             return request_method(f"{self.base_url}{path}", timeout=self.timeout, **kwargs)
         except TimeoutError as exc:
@@ -573,7 +610,7 @@ def raise_for_error(response: ResponseLike) -> None:
     status = _status_from_body(body, response.status_code)
     if code == "plc_error":
         raise GomcRestPLCProtocolError(message, status, code, str(body.get("end_code", "")))
-    exc_class = _CODE_TO_EXC.get(code, GomcRestError)
+    exc_class = _CODE_TO_EXC.get(code) or _STATUS_TO_EXC.get(status, GomcRestError)
     raise exc_class(message, status, code)
 
 

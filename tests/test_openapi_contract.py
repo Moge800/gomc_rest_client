@@ -5,8 +5,11 @@ from typing import Any
 
 import yaml
 
-FIXTURE_PATH = Path(__file__).parent / "fixtures" / "gomc-rest-v1.3.0-openapi.yaml"
-PINNED_OPENAPI_VERSION = "v1.3.0"
+FIXTURE_PATH = Path(__file__).parent / "fixtures" / "gomc-rest-v1.4.0-openapi.yaml"
+# The fixture is a verbatim copy of the gomc-rest v1.4.0 openapi.yaml. Its
+# info.version is the upstream literal "dev" (the real value is injected at
+# build time); the pinned release is tracked by the fixture filename instead.
+PINNED_OPENAPI_VERSION = "dev"
 
 CLIENT_ROUTE_METHODS = {
     "/version": "get",
@@ -252,17 +255,29 @@ def test_openapi_contract_uses_pinned_release_version() -> None:
     assert spec["info"]["version"] == PINNED_OPENAPI_VERSION
 
 
+def test_openapi_contract_declares_bearer_auth_with_health_exempt() -> None:
+    spec = _load_openapi_spec()
+
+    bearer = spec["components"]["securitySchemes"]["bearerAuth"]
+    assert bearer["type"] == "http"
+    assert bearer["scheme"] == "bearer"
+    assert {"bearerAuth": []} in spec["security"]
+    # /health must stay reachable without a token for liveness monitoring.
+    assert spec["paths"]["/health"]["get"]["security"] == []
+
+
 def test_openapi_contract_keeps_required_fields_for_info_version_and_metrics() -> None:
     spec = _load_openapi_spec()
 
     info_schema = _response_schema(spec, "/info", "get", "200")
     version_schema = _response_schema(spec, "/version", "get", "200")
     metrics_schema = _response_schema(spec, "/metrics", "get", "200")
-    info_required = info_schema.get("required", [])
     version_required = version_schema.get("required", [])
     metrics_required = metrics_schema.get("required", [])
 
-    assert set(info_required) >= set(EXPECTED_INFO_RESPONSE_FIELDS)
+    # Upstream /info does not declare a `required` list, so validate the fields
+    # by presence and type in `properties` (checked below) rather than requiredness.
+    assert set(EXPECTED_INFO_RESPONSE_FIELDS) <= set(info_schema.get("properties", {}))
     assert "version" in version_required
     assert set(metrics_required) >= {
         "request_count",

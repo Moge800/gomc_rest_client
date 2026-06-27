@@ -18,6 +18,7 @@ from gomc_rest_client import (
     GomcRestQueueClosedError,
     GomcRestRequestCanceledError,
     GomcRestRequestTimeoutError,
+    GomcRestUnauthorizedError,
     PLCClient,
 )
 from gomc_rest_client.client import _build_url, _UrllibSession
@@ -413,9 +414,9 @@ def test_is_version_compatible_rejects_invalid_minimum_version() -> None:
 @pytest.mark.parametrize(
     ("server_version", "allow_dev", "expected"),
     [
-        ("v1.3.0", True, True),
-        ("v1.3.1", True, True),
-        ("v1.2.9", True, False),
+        ("v1.4.0", True, True),
+        ("v1.4.1", True, True),
+        ("v1.3.9", True, False),
         ("v0.10.0", True, False),
         ("dev", True, True),
         ("dev", False, False),
@@ -425,17 +426,17 @@ def test_is_supported_version(server_version: str, allow_dev: bool, expected: bo
     session = FakeSession([FakeResponse(payload={"version": server_version})])
     client = PLCClient(session=session)
 
-    assert MINIMUM_SUPPORTED_GOMC_REST_VERSION == "v1.3.0"
+    assert MINIMUM_SUPPORTED_GOMC_REST_VERSION == "v1.4.0"
     assert client.is_supported_version(allow_dev=allow_dev) is expected
 
 
 def test_version_helpers_reuse_cached_version() -> None:
-    session = FakeSession([FakeResponse(payload={"version": "v1.3.0"})])
+    session = FakeSession([FakeResponse(payload={"version": "v1.4.0"})])
     client = PLCClient(session=session)
 
-    assert client.version() == "v1.3.0"
+    assert client.version() == "v1.4.0"
     assert client.is_supported_version() is True
-    assert client.is_version_compatible("v1.3.0") is True
+    assert client.is_version_compatible("v1.4.0") is True
     assert len(session.calls) == 1
     assert session.calls[0]["url"] == "http://localhost:8080/version"
 
@@ -444,6 +445,7 @@ def test_version_helpers_reuse_cached_version() -> None:
     ("code", "status", "exc_type"),
     [
         ("bad_request", 400, GomcRestBadRequestError),
+        ("unauthorized", 401, GomcRestUnauthorizedError),
         ("forbidden", 403, GomcRestForbiddenError),
         ("connection_error", 503, GomcRestConnectionError),
         ("busy", 503, GomcRestBusyError),
@@ -870,3 +872,198 @@ def test_error_dispatch_falls_back_to_response_status_for_invalid_body_status() 
         client.remote_stop()
 
     assert exc_info.value.status == 503
+
+
+def test_token_is_sent_as_bearer_authorization_header() -> None:
+    session = FakeSession(
+        [
+            FakeResponse(payload={"plc_status": "ok", "connected": True}),
+            FakeResponse(payload={"ok": True}),
+        ]
+    )
+    client = PLCClient(session=session, token="s3cret")
+
+    client.health()
+    client.remote_stop()
+
+    assert session.calls[0]["headers"] == {"Authorization": "Bearer s3cret"}
+    assert session.calls[1]["headers"] == {"Authorization": "Bearer s3cret"}
+
+
+def test_no_token_omits_authorization_header() -> None:
+    session = FakeSession([FakeResponse(payload={"plc_status": "ok", "connected": True})])
+    client = PLCClient(session=session)
+
+    client.health()
+
+    assert "headers" not in session.calls[0]
+
+
+def test_unauthorized_status_without_code_maps_to_unauthorized_error() -> None:
+    session = FakeSession(
+        [FakeResponse(status_code=401, payload={"status": 401, "error": "unauthorized"})]
+    )
+    client = PLCClient(session=session)
+
+    with pytest.raises(GomcRestUnauthorizedError) as exc_info:
+        client.remote_stop()
+
+    assert exc_info.value.status == 401
+
+
+def test_urllib_session_sends_authorization_header(monkeypatch: pytest.MonkeyPatch) -> None:
+    created_connections: list[FakeHTTPConnection] = []
+
+    def fake_create_http_connection(
+        scheme: str, host: str, port: int | None, timeout: float | None
+    ) -> FakeHTTPConnection:
+        connection = FakeHTTPConnection([FakeHTTPResponse(200, b'{"ok":true}')])
+        created_connections.append(connection)
+        return connection
+
+    monkeypatch.setattr(
+        "gomc_rest_client.client._create_http_connection", fake_create_http_connection
+    )
+
+    _UrllibSession().get(
+        "http://localhost:8080/health",
+        headers={"Authorization": "Bearer s3cret"},
+        timeout=3.5,
+    )
+
+    assert created_connections[0].requests[0]["headers"] == {"Authorization": "Bearer s3cret"}
+
+
+def test_urllib_session_drops_authorization_on_cross_host_redirect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    redirect_connection = FakeHTTPConnection(
+        [FakeHTTPResponse(301, b"", headers={"Location": "http://evil.example/health"})]
+    )
+    destination_connection = FakeHTTPConnection(
+        [FakeHTTPResponse(200, b'{"plc_status":"ok"}')]
+    )
+
+    def fake_create_http_connection(
+        scheme: str, host: str, port: int | None, timeout: float | None
+    ) -> FakeHTTPConnection:
+        if host == "localhost":
+            return redirect_connection
+        if host == "evil.example":
+            return destination_connection
+        raise AssertionError(host)
+
+    monkeypatch.setattr(
+        "gomc_rest_client.client._create_http_connection", fake_create_http_connection
+    )
+
+    _UrllibSession().get(
+        "http://localhost:8080/health",
+        headers={"Authorization": "Bearer s3cret"},
+        timeout=3.5,
+    )
+
+    assert redirect_connection.requests[0]["headers"] == {"Authorization": "Bearer s3cret"}
+    assert destination_connection.requests[0]["headers"] == {}
+
+
+@pytest.mark.parametrize(
+    ("start_url", "location"),
+    [
+        ("https://localhost:8443/health", "http://localhost:8443/health"),  # scheme downgrade
+        ("http://localhost:8080/health", "http://localhost:9090/health"),  # port change
+    ],
+)
+def test_urllib_session_drops_authorization_on_origin_change(
+    monkeypatch: pytest.MonkeyPatch, start_url: str, location: str
+) -> None:
+    redirect_connection = FakeHTTPConnection(
+        [FakeHTTPResponse(301, b"", headers={"Location": location})]
+    )
+    destination_connection = FakeHTTPConnection([FakeHTTPResponse(200, b'{"plc_status":"ok"}')])
+    first = True
+
+    def fake_create_http_connection(
+        scheme: str, host: str, port: int | None, timeout: float | None
+    ) -> FakeHTTPConnection:
+        nonlocal first
+        if first:
+            first = False
+            return redirect_connection
+        return destination_connection
+
+    monkeypatch.setattr(
+        "gomc_rest_client.client._create_http_connection", fake_create_http_connection
+    )
+
+    _UrllibSession().get(
+        start_url,
+        headers={"Authorization": "Bearer s3cret"},
+        timeout=3.5,
+    )
+
+    assert redirect_connection.requests[0]["headers"] == {"Authorization": "Bearer s3cret"}
+    assert destination_connection.requests[0]["headers"] == {}
+
+
+def test_urllib_session_does_not_restore_authorization_when_chain_returns_to_origin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A -> B (different origin) -> A: the token must stay dropped on the 3rd hop.
+    connection_a = FakeHTTPConnection(
+        [
+            FakeHTTPResponse(307, b"", headers={"Location": "http://other:8080/health"}),
+            FakeHTTPResponse(200, b'{"plc_status":"ok"}'),
+        ]
+    )
+    connection_b = FakeHTTPConnection(
+        [FakeHTTPResponse(307, b"", headers={"Location": "http://localhost:8080/health"})]
+    )
+
+    def fake_create_http_connection(
+        scheme: str, host: str, port: int | None, timeout: float | None
+    ) -> FakeHTTPConnection:
+        return connection_a if host == "localhost" else connection_b
+
+    monkeypatch.setattr(
+        "gomc_rest_client.client._create_http_connection", fake_create_http_connection
+    )
+
+    _UrllibSession().get(
+        "http://localhost:8080/health",
+        headers={"Authorization": "Bearer s3cret"},
+        timeout=3.5,
+    )
+
+    assert connection_a.requests[0]["headers"] == {"Authorization": "Bearer s3cret"}
+    assert connection_b.requests[0]["headers"] == {}
+    assert connection_a.requests[1]["headers"] == {}
+
+
+def test_urllib_session_keeps_authorization_on_same_origin_redirect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A same-origin redirect reuses the cached connection, so queue both responses on it.
+    connection = FakeHTTPConnection(
+        [
+            FakeHTTPResponse(301, b"", headers={"Location": "http://localhost:8080/health/"}),
+            FakeHTTPResponse(200, b'{"plc_status":"ok"}'),
+        ]
+    )
+
+    def fake_create_http_connection(
+        scheme: str, host: str, port: int | None, timeout: float | None
+    ) -> FakeHTTPConnection:
+        return connection
+
+    monkeypatch.setattr(
+        "gomc_rest_client.client._create_http_connection", fake_create_http_connection
+    )
+
+    _UrllibSession().get(
+        "http://localhost:8080/health",
+        headers={"Authorization": "Bearer s3cret"},
+        timeout=3.5,
+    )
+
+    assert connection.requests[1]["headers"] == {"Authorization": "Bearer s3cret"}
