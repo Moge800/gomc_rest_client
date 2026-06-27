@@ -341,6 +341,7 @@ def test_random_write_pairs_requires_at_least_one_item() -> None:
         ({"words": [True], "dwords": []}, "response words must be a list of ints"),
         ({"words": [1], "dwords": "bad"}, "response dwords must be a list of ints"),
         ({"words": [1], "dwords": [False]}, "response dwords must be a list of ints"),
+        ({"words": [1], "dwords": []}, "response bits must be a list of bools"),
         ({"words": [1], "dwords": [], "bits": "bad"}, "response bits must be a list of bools"),
         ({"words": [1], "dwords": [], "bits": [1]}, "response bits must be a list of bools"),
     ],

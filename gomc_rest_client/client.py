@@ -378,7 +378,7 @@ class PLCClient:
         body = _require_json_object(response)
         random_words = body.get("words")
         random_dwords = body.get("dwords")
-        random_bits = body.get("bits", [])
+        random_bits = body.get("bits")
         if not isinstance(random_words, list) or not all(
             isinstance(value, int) and not isinstance(value, bool) for value in random_words
         ):
