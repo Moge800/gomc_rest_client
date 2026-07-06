@@ -10,43 +10,16 @@ jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
 
     steps:
-      - name: Checkout
+      - name: Checkout release tag
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.repository.default_branch }}
-          fetch-depth: 0
-
-      - name: Sync package version from release tag
-        if: github.event_name == 'release'
-        shell: bash
-        env:
-          TAG_VERSION: ${{ github.event.release.tag_name }}
-        run: |
-          python - <<'PY'
-          import os
-          import pathlib
-          import re
-
-          pyproject_path = pathlib.Path("pyproject.toml")
-          text = pyproject_path.read_text(encoding="utf-8")
-          tag_version = os.environ["TAG_VERSION"].removeprefix("v")
-
-          updated_text, count = re.subn(
-              r'(^\[project\]\n(?:.+\n)*?version = ")([^"]+)(")',
-              rf'\g<1>{tag_version}\g<3>',
-              text,
-              count=1,
-              flags=re.MULTILINE,
-          )
-
-          if count != 1:
-              raise SystemExit("project version not found in pyproject.toml")
-
-          pyproject_path.write_text(updated_text, encoding="utf-8")
-          PY
+          ref: >-
+            ${{ github.event_name == 'release'
+                && github.event.release.tag_name
+                || github.event.repository.default_branch }}
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v6
@@ -56,24 +29,18 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Refresh lockfile from release tag
-        if: github.event_name == 'release'
-        run: uv lock
-
-      - name: Commit synced package metadata
+      - name: Check tag matches package version
         if: github.event_name == 'release'
         shell: bash
+        env:
+          TAG_NAME: ${{ github.event.release.tag_name }}
         run: |
-          if git diff --quiet -- pyproject.toml uv.lock; then
-            echo "Package metadata already matches the release tag."
-            exit 0
+          project_version="$(python -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text("utf-8"))["project"]["version"])')"
+          if [ "${TAG_NAME}" != "v${project_version}" ]; then
+            echo "::error::release tag ${TAG_NAME} does not match package version ${project_version}"
+            echo "Bump the version in pyproject.toml and tag that commit as v${project_version}."
+            exit 1
           fi
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add pyproject.toml uv.lock
-          git commit -m "chore: sync package version from release tag"
-          git push origin HEAD:${{ github.event.repository.default_branch }}
 
       - name: Build distributions
         run: uv build
