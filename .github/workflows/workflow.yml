@@ -13,7 +13,7 @@ jobs:
       contents: read
 
     steps:
-      - name: Checkout release tag
+      - name: Checkout release tag (default branch on manual runs)
         uses: actions/checkout@v4
         with:
           ref: >-
@@ -35,7 +35,10 @@ jobs:
         env:
           TAG_NAME: ${{ github.event.release.tag_name }}
         run: |
-          project_version="$(python -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text("utf-8"))["project"]["version"])')"
+          if ! project_version="$(python -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text("utf-8"))["project"]["version"])' 2>/dev/null)"; then
+            echo "::error::could not read [project].version from pyproject.toml"
+            exit 1
+          fi
           if [ "${TAG_NAME}" != "v${project_version}" ]; then
             echo "::error::release tag ${TAG_NAME} does not match package version ${project_version}"
             echo "Bump the version in pyproject.toml and tag that commit as v${project_version}."
