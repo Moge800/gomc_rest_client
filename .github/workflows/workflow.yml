@@ -40,8 +40,12 @@ jobs:
             exit 1
           fi
           if [ "${TAG_NAME}" != "v${project_version}" ]; then
-            echo "::error::release tag ${TAG_NAME} does not match package version ${project_version}"
-            echo "Bump the version in pyproject.toml and tag that commit as v${project_version}."
+            # Keep untrusted values out of the ::error:: workflow command to
+            # avoid workflow-command injection; print them as plain log lines.
+            echo "::error::release tag does not match the package version in pyproject.toml"
+            printf 'tag:     %s\n' "${TAG_NAME}"
+            printf 'version: %s\n' "${project_version}"
+            echo "Bump the version in pyproject.toml and tag that commit."
             exit 1
           fi
 
