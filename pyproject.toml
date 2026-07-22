@@ -1,10 +1,11 @@
 [project]
 name = "gomc-rest-client"
-version = "0.10.0"
+version = "0.10.1"
 description = "Synchronous Python client for the gomc-rest API"
 readme = "README.md"
 requires-python = ">=3.10"
-license = "MIT"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 authors = [
   { name = "Moge800" },
 ]
@@ -12,7 +13,6 @@ keywords = ["plc", "mitsubishi", "mc-protocol", "gomc-rest"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
-  "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
@@ -48,6 +48,7 @@ include = [
   "/tests",
   "/README.md",
   "/LICENSE",
+  "/NOTICE",
   "/pyproject.toml",
 ]
 
