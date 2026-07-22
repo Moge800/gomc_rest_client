@@ -317,7 +317,7 @@ class PLCClient:
     def is_supported_version(self, *, allow_dev: bool = True) -> bool:
         """Return ``True`` if the server meets the library's minimum version requirement.
 
-        The minimum is :data:`MINIMUM_SUPPORTED_GOMC_REST_VERSION` (``"v1.3.0"``).
+        The minimum is :data:`MINIMUM_SUPPORTED_GOMC_REST_VERSION` (``"v1.4.0"``).
         """
         return self.is_version_compatible(MINIMUM_SUPPORTED_GOMC_REST_VERSION, allow_dev=allow_dev)
 
